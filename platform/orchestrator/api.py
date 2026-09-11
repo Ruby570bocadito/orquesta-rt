@@ -195,6 +195,14 @@ RUTAS_PUBLICAS = {
 # un endpoint nuevo de escritura queda protegido sin tocar su código).
 RUTAS_ESCRITURA_LECTOR = {
     "/api/auth/contrasena",
+    # v22: calcular rutas de ataque es una CONSULTA pura al motor Neo4j
+    # (Cypher allShortestPaths, sin mutación de ningún dato): la puede pedir
+    # un lector. El aislamiento de casos no aplica (el motor es del
+    # despliegue, no del caso) y no crea evidencias ni aprobaciones.
+    "/api/integraciones/rutas",
+    # v22: enriquecimiento CVE es una LECTURA externa (API pública del NVD,
+    # solo GET saliente): tampoco muta el despliegue ni crea evidencias.
+    "/api/integraciones/nvd/enriquecer",
 }
 _RE_ENGAGEMENT = re.compile(r"^/api/engagements/([^/]+)(?:/.*)?$")
 

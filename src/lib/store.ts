@@ -85,8 +85,14 @@ async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<T> {
     /* respuesta vacía */
   }
   if (!r.ok) {
+    // El backend FastAPI responde "detail"; algunos módulos propios usan
+    // "detalle"/"error". Se leen los tres para no degradar nunca un mensaje
+    // claro del servidor a un "HTTP 403" crudo.
     const detalle =
-      (cuerpo.detalle as string) ?? (cuerpo.error as string) ?? `HTTP ${r.status}`;
+      (cuerpo.detail as string) ??
+      (cuerpo.detalle as string) ??
+      (cuerpo.error as string) ??
+      `HTTP ${r.status}`;
     throw new Error(typeof detalle === "string" ? detalle : JSON.stringify(detalle));
   }
   return cuerpo as T;

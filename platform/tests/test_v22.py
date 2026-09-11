@@ -185,6 +185,44 @@ def test_api_rutas_flujo_completo(_api, token_admin):
     assert rutas_res["rutas"][0]["nodos"][0]["nombre"] == "CFDEZ@TEST.LOCAL"
 
 
+def test_lector_puede_consultar_rutas_regresion_403(_api, token_admin):
+    """Regresión del E2E real (v22): el POST de rutas es una consulta pura
+    al motor y el middleware RBAC no debe bloquearla a un lector (antes
+    respondía 403 por ser POST). Sin motor configurado, el endpoint sigue
+    respondiendo 200 con el requisito exacto — jamás 403."""
+    from fastapi.testclient import TestClient
+    import time as _time
+    from orchestrator import auth as auth_mod
+    cab = {"Authorization": f"Bearer {token_admin}"}
+    usuario = f"lect.rutas{int(_time.time()) % 1000000}"
+    r = _api.post("/api/auth/registrar", headers=cab, json={
+        "usuario": usuario, "contrasena": "ClaveLectora1!",
+        "rol": "lector"})
+    assert r.status_code == 200, r.text
+    token = auth_mod.emitir_token(usuario, "lector",
+                                  "predeterminada")["token"]
+    l = TestClient(_api.app)
+    l.headers.update({"Authorization": f"Bearer {token}"})
+    resp = l.post("/api/integraciones/rutas",
+                  json={"origen": "", "limite": 3})
+    assert resp.status_code == 200, resp.text
+    # Y el enriquecimiento NVD (también consulta pura): 200, no 403.
+    r2 = l.post("/api/integraciones/nvd/enriquecer",
+                json={"texto": "OpenSSH 8.2p1"})
+    assert r2.status_code == 200, r2.text
+    # Pero una escritura real del caso SIGUE prohibida (RBAC intacto).
+    assert l.post("/api/engagements", json={
+        "nombre": "x", "cliente": "y"}).status_code == 403
+    cuerpo = resp.json()
+    # Con el motor del lab disponible: rutas reales; sin él: requisito
+    # honesto. En NINGÚN caso un lector recibe 403 por consultar.
+    if cuerpo.get("conectado"):
+        assert isinstance(cuerpo.get("rutas"), list)
+    else:
+        assert "error" in cuerpo
+    auth_mod.eliminar_operador(usuario, peticionario="test-lector-rutas")
+
+
 # ---------------------------------------------------------------- SSO: IdP real
 
 def test_sso_estado_con_idp_real(monkeypatch):
