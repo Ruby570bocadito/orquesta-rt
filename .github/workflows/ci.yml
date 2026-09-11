@@ -1,0 +1,50 @@
+# CI de OrquestaRT — los tests corren en cada push y PR.
+# Backend: pytest completo (platform/tests). Frontend: tsc + eslint.
+# Sin secretos: la suite no requiere credenciales externas.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: platform/requirements.txt
+
+      - name: Instalar dependencias del núcleo
+        run: pip install -r platform/requirements.txt
+
+      - name: Tests (pytest completo)
+        working-directory: platform
+        run: python -m pytest tests/ -q --tb=short
+
+  consola:
+    name: Consola (tsc + eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Instalar dependencias de la consola
+        run: bun install --frozen-lockfile
+
+      - name: Typescript (tsc)
+        run: bunx tsc --noEmit
+
+      - name: Lint (eslint)
+        run: bun run lint
