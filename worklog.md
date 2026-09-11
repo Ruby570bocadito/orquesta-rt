@@ -505,3 +505,29 @@ Stage Summary:
 - El despliegue Docker/K8s corrige un bug real del Dockerfile (integraciones/ ausente) y persiste las cuentas; manifiestos K8s con sondas y seguridad verificadas estructuralmente en tests.
 - 3 bugs de ronda corregidos (certifi roto del entorno, alias de integración, tenant ignorado en alta) — 2 capturados por el E2E en vivo.
 - Entregable: download/orquesta-rt-plataforma-v21.zip.
+
+---
+Task ID: 22
+Agent: main (Super Z)
+Task: Ronda v22 (continuación) — SSO federado E2E con Keycloak real, rutas de ataque con Neo4j real, NVD, subida del repo a GitHub privado + devcontainer Codespaces, bugs capturados por pruebas de operador, investigación de mejoras.
+
+Work Log:
+- GITHUB: historia nueva limpia (orphan, 215 ficheros) tras detectar .venv trackeada (8.881 ficheros) y binarios; .gitignore endurecido (.venv, lab/keycloak-*/, lab/neo4j-community-*/, lab/*admin.txt, lab/*.pid, lab/logs, lab/downloads, lab/env_laboratorio.sh, /skills/ del entorno, download/*.zip); .devcontainer/devcontainer.json (node 22 + python 3.12 + bun, postCreateCommand ./install.sh, puertos 3000/8000/8080/8081/7474/7687) → repo privado Ruby570bocadito/orquesta-rt creado por API y pusheado (devcontainer verificado en remoto). Advertencia al operador: rotar el PAT publicado en el chat.
+- E2E SSO FEDERADO REAL (navegador): acceso → botón "Entrar con SSO del equipo" → redirect a Keycloak :8081 con PKCE S256 → login operador/Operador-Lab-2026 → callback con code → canje + verificación RS256 del id_token vía JWKS → sesión activa en consola como lector (JIT). Captura v22_sso_sesion_federada.png (ronda anterior) + flujo re-verificado tras reinicios.
+- RUTAS DE ATAQUE E2E: Integraciones → sección Rutas: motor Neo4j conectado, orígenes reales del grafo (PGONZAL Manager IT, SVC_BACKUP), objetivos alto valor (DOMAIN ADMINS, IT-ADMINS, DC01) → 5 rutas renderizadas con nodos/aristas tal como las devuelve allShortestPaths. Captura v22_rutas_lector_federado.png.
+- BUG 1 (capturado por E2E de operador): POST /integraciones/rutas → 403 para lector federado; el middleware RBAC v21 exige nivel ≥2 para TODO POST, pero calcular rutas es consulta pura al motor (sin mutación ni evidencias) → añadido a RUTAS_ESCRITURA_LECTOR + test de regresión (lector consulta rutas 200; crear caso sigue 403).
+- BUG 2 (misma clase): POST /integraciones/nvd/enriquecer → 403 para lector; enriquecimiento CVE es LECTURA externa (API pública NVD) → añadido a la lista + test extendido.
+- BUG 3 (UX, capturado por E2E): el backend responde {"detail": "..."} y la consola leía cuerpo.detalle → el operador veía "HTTP 403" crudo en vez del mensaje claro; api() de store.ts ahora lee detail/detalle/error. Además: botón "Nuevo engagement" oculto a lectores con nota ámbar "solo lectura" (verificado en vivo).
+- BUG 4 (infra del reinicio): el venv quedó destruido por el reset --hard del reordenamiento git (venv trackeada en el histórico viejo) → ./install.sh idempotente la reconstruyó; detectado que matar logs/api.pid + start.sh en ventana de 3s NO reemplaza el proceso (SIGTERM graceful 5s): reinicio quirúrgico kill PID + esperar puerto libre + relanzar → verificado con PID nuevo.
+- NVD E2E: "Apache 2.4.49" → CVE-2021-41773 y CVE-2021-42013 REALES del NIST (CRITICAL, CVSS 9.8) renderizados en la consola como lector federado. Captura v22_nvd_cves_reales.png.
+- LAB: creado lab/neo4j_arrancar.sh idempotente (password inicial, conf de laboratorio con append único, espera HTTP) y lab/env_laboratorio.ejemplo.sh (plantilla sin secretos para el repo); verificado idempotencia en vivo ("Neo4j ya está en marcha").
+- VALIDACIÓN: 290/290 pytest (289 + 2 nuevos, 1 renombrado), tsc 0, eslint 0, móvil 390px overflow 0px, 0 errores de página tras recarga limpia (los errores de Hooks previos eran artefactos del Fast Refresh al añadir hooks con el componente montado).
+- LIMPIEZA: cuenta de diagnóstico lect.diag dada de baja; el usuario SSO del lab se conserva (auto-JIT).
+- EMPAQUETADO: scripts/empaquetar.py → v22.zip con lab/ en LISTA BLANCA (6 ficheros de laboratorio, jamás env real ni credenciales) + .devcontainer; 175 ficheros/2.891 KB, anti-secretos LIMPIO, verificado por lectura del ZIP.
+- INVESTIGACIÓN (web-search): (1) tendencia CTEM/AEV — simulación continua en bucle con delta entre ejecuciones (Picus/SCYTHE/Caldera); (2) agentes de red team IA comprimen semanas→horas (Dreadnode, arxiv 2026) — valida la orquestación existente; (3) BloodHound CE oficial vía docker-compose + Azure paths (AzureHound). Propuestas para siguiente ronda: modo continuo CTEM (programar cadenas, delta de cobertura y detecciones entre corridas), cierre del bucle purple (regla Sigma sugerida por hallazgo y validada contra detecciones), ingestión Azure/híbrido en el motor de rutas.
+
+Stage Summary:
+- El repo vive en GitHub privado con devcontainer: abrir en Codespace = ./install.sh + ./start.sh y todo levanta.
+- El SSO federado es real de extremo a extremo y las pruebas de operador capturaron 3 bugs de integración RBAC/UI que ningún test unitario veía: los lectores federados ya consultan rutas y CVEs sin 403 falsos, y las denegaciones muestran su mensaje.
+- El motor Neo4j del laboratorio sirve rutas de ataque reales con esquema BloodHound y el NVD completa el intel sin MISP.
+- Entregables: repo Ruby570bocadito/orquesta-rt (main=c89152a+fixes) y download/orquesta-rt-plataforma-v22.zip.

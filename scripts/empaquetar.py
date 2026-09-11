@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 RAIZ = Path("/home/z/my-project")
-DESTINO = RAIZ / "download" / "orquesta-rt-plataforma-v21.zip"
+DESTINO = RAIZ / "download" / "orquesta-rt-plataforma-v22.zip"
 
 # --- Incluidos de nivel raíz -------------------------------------------------
 RAIZ_FICHEROS = [
@@ -25,7 +25,22 @@ RAIZ_FICHEROS = [
     # Instalación/operación en un paso (v10)
     "install.sh", "start.sh", "stop.sh",
 ]
-CARPETAS = ["src", "public", "scripts", "docs", "deploy"]
+CARPETAS = ["src", "public", "scripts", "docs", "deploy", ".devcontainer"]
+
+# --- lab/ con lista blanca (v22): scripts de laboratorio REALES -------------
+# Solo el código que el operador necesita para montar SU laboratorio. Los
+# binarios descargados (keycloak-*/, neo4j-community-*/), credenciales
+# (keycloak-admin.txt, neo4j-admin.txt), pids, logs, downloads y el
+# env_laboratorio.sh REAL (con secretos del propio despliegue) NO se
+# empaquetan jamás — para eso está la plantilla env_laboratorio.ejemplo.sh.
+LAB_INCLUIDOS = [
+    "lab/coleccion.cypher",
+    "lab/coleccion_dominio.py",
+    "lab/env_laboratorio.ejemplo.sh",
+    "lab/keycloak_arrancar.sh",
+    "lab/provisionar_keycloak.sh",
+    "lab/neo4j_arrancar.sh",
+]
 
 # --- Ficheros huérfanos de nivel raíz que NO deben volver a empaquetarse ---
 RAIZ_EXCLUIDOS = ["examples", "tests", "prisma", "dev.log", "server.log"]
@@ -79,6 +94,15 @@ def main() -> None:
                     omitidos.append(rel)
                     continue
                 anadir(ruta, rel)
+
+        # lab/ en lista blanca (v22): scripts de laboratorio, sin secretos
+        for nombre in LAB_INCLUIDOS:
+            ruta = RAIZ / nombre
+            if ruta.is_file():
+                z.write(ruta, f"orquesta-rt/{nombre}")
+                total.append(nombre)
+            else:
+                omitidos.append(f"{nombre} (no existe)")
 
         # platform/ completo menos runtime/cachés
         for ruta in sorted((RAIZ / "platform").rglob("*")):

@@ -36,6 +36,8 @@ export function VistaCasos() {
   const casos = usarConsola((s) => s.casos);
   const casoActivo = usarConsola((s) => s.casoActivo);
   const seleccionarCaso = usarConsola((s) => s.seleccionarCaso);
+  const sesion = usarConsola((s) => s.sesion);
+  const esLector = sesion?.rol === "lector";
   const [dialogo, setDialogo] = useState(false);
   const [creando, setCreando] = useState(false);
 
@@ -52,12 +54,19 @@ export function VistaCasos() {
             titulo="Engagements del equipo"
             descripcion="Cada caso es una base SQLite aislada con su ROE, su memoria y su cadena de custodia"
           />
-          <Button
-            onClick={() => setDialogo(true)}
-            className="bg-crimson text-white hover:bg-crimson-bright"
-          >
-            <Plus className="h-4 w-4" /> Nuevo engagement
-          </Button>
+          {esLector ? (
+            <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+              Tu rol es de solo lectura: puedes consultar los casos pero no
+              crear engagements
+            </span>
+          ) : (
+            <Button
+              onClick={() => setDialogo(true)}
+              className="bg-crimson text-white hover:bg-crimson-bright"
+            >
+              <Plus className="h-4 w-4" /> Nuevo engagement
+            </Button>
+          )}
         </div>
       </Tarjeta>
 
