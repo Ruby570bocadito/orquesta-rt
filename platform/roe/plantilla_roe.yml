@@ -1,0 +1,60 @@
+# =============================================================================
+# Plantilla de Reglas de Compromiso (ROE) máquina-legible
+# -----------------------------------------------------------------------------
+# Este fichero es un CONTROL ACTIVO, no documentación: el motor de guardrails
+# lo compila y lo consulta ANTES de cada tool call (cap. 4.2 y 5.1 del
+# blueprint). Prohibir aquí una técnica = bloquearla en el boundary.
+#
+# Campos (todos en español, validados por orchestrator.models.ROEPolitica):
+# =============================================================================
+
+engagement_id: "caso_EXAMPLE"        # se completa al crear el caso
+cliente: "Nombre del Cliente S.L."
+
+# --- Alcance autorizado ------------------------------------------------------
+# Dominios con coincidencia de sufijo (sub.dominio cubre dominio).
+alcance_dominios:
+  - ejemplo-cliente.com
+  - lab.ejemplo-cliente.com
+# CIDRs autorizados (direcciones IP exactas o redes).
+alcance_cidrs:
+  - "203.0.113.0/24"
+# Exclusiones ABSOLUTAS: vetadas aunque parezcan del cliente (hosting compartido,
+# terceros, sistemas de producción sensibles). El boundary las deniega siempre.
+alcance_excluido:
+  - "203.0.113.1"                     # p. ej. firewall compartido con terceros
+  - sistemas-criticos.ejemplo-cliente.com
+
+# --- Técnicas ----------------------------------------------------------------
+# IDs MITRE ATT&CK prohibidos en este engagement (bloqueo duro del boundary).
+tecnicas_prohibidas:
+  - "T1485"     # destructividad de datos
+  - "T1489"     # parada de servicios
+  - "T1490"     # inhibición de recuperación
+# Técnicas permitidas SOLO con firma humana previa en consola.
+tecnicas_con_aprobacion:
+  - "T1558.003" # Kerberoasting
+  - "T1558.004" # AS-REP roasting
+  - "T1110.003" # password spraying
+
+# --- Ruido y ventanas ----------------------------------------------------------
+# Techo de ruido acordado con el cliente (0-100). El agente modela el ruido de
+# cada acción y se auto-limita: al acercarse al techo, reduce actividad y avisa.
+techo_ruido: 50
+# Ventana horaria de actividad ACTIVA (hora local del despliegue). El OSINT
+# pasivo no está limitado por la ventana; los escaneos y explotaciones sí.
+ventanas_activas:
+  inicio: "08:00"
+  fin: "20:00"
+  dias: [lun, mar, mie, jue, vie]
+
+# --- Emergencia ------------------------------------------------------------------
+# Parada de emergencia: cualquier parte puede detener el ciclo. El orquestador
+# marca el engagement como bloqueado y el grafo no avanza.
+parada_emergencia: true
+
+# Notas libres (aparecen en la consola y en el informe).
+notas: >
+  Plantilla de ejemplo. Completar tras la entrevista de scoping (fase F0).
+  El borrador lo redacta el agente de scoping y LO FIRMA el operador:
+  la firma humana convierte este documento en la política activa del caso.

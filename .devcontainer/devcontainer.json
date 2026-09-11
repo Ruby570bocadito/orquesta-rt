@@ -1,0 +1,30 @@
+{
+  "name": "OrquestaRT",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" },
+    "ghcr.io/meaningful-ooo/devcontainer-features/bun:1": {}
+  },
+  "postCreateCommand": "./install.sh",
+  "forwardPorts": [3000, 8000, 8080, 8081, 7474, 7687],
+  "portsAttributes": {
+    "3000": { "label": "Consola (Next.js)", "onAutoForward": "openBrowser" },
+    "8000": { "label": "Orquestador (FastAPI)" },
+    "8080": { "label": "Lab de prácticas" },
+    "8081": { "label": "IdP de laboratorio (Keycloak)", "onAutoForward": "ignore" },
+    "7474": { "label": "Motor de rutas (Neo4j HTTP)", "onAutoForward": "ignore" },
+    "7687": { "label": "Neo4j Bolt", "onAutoForward": "ignore" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-python.python",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  },
+  "remoteUser": "vscode"
+}

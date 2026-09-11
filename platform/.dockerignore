@@ -1,0 +1,15 @@
+# Contexto de construcción del orquestador: nunca en la imagen
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+casos/
+*.db
+*.db-shm
+*.db-wal
+usuarios.db
+.env
+.env.*
+tests/
+lab/
+*.bak*

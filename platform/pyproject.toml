@@ -1,0 +1,39 @@
+[project]
+name = "orquestador-redteam-ia"
+version = "0.1.0"
+description = "Núcleo propietario de la plataforma de red team orquestada por IA (código cerrado)"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+
+dependencies = [
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "typer>=0.14",
+    "rich>=13.9",
+    "httpx>=0.28",
+    "msgpack>=1.1",
+    "ldap3>=2.9",
+    "dnspython>=2.7",
+    "cryptography>=43.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+orquestador = ["langgraph>=0.2.60", "langchain-core>=0.3.28"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
+mcp = ["mcp>=1.1.2"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+redteam = "orchestrator.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["orchestrator*", "mcp*"]

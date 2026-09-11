@@ -1,0 +1,36 @@
+# Núcleo de orquestación
+langgraph>=0.2.60
+langchain-core>=0.3.28
+pydantic>=2.9
+
+# API y CLI
+fastapi>=0.115
+uvicorn[standard]>=0.32
+typer>=0.14
+rich>=13.9
+
+# Firma de evidencias y bóveda de credenciales
+cryptography>=43.0
+
+# Servidores MCP (SDK oficial)
+mcp>=1.1.2
+
+# Recon pasivo / sondeo HTTP
+dnspython>=2.7
+httpx>=0.28
+
+# Integraciones reales
+msgpack>=1.1        # MSG-RPC oficial de Metasploit
+ldap3>=2.9          # LDAP / Active Directory (cliente del protocolo)
+impacket>=0.13       # Kerberos/SMB/DRSUAPI ofensivo real (kerberoasting, PTH, dcsync)
+yara-python>=4.5     # motor de firmas real para verificación de evasión
+
+# Opcional (cliente gRPC oficial de Sliver C2): pip install sliver-py
+# sliver-py>=0.0.4
+
+# Utilidades
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# Opcional: índice vectorial local para RAG del caso (descomentar si se desea)
+# chromadb>=0.5

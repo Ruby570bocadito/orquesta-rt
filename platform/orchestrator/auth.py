@@ -1,0 +1,624 @@
+"""Autenticación de operadores: cuentas reales, JWT y control de acceso.
+
+La consola gestiona acciones con consecuencias legales (aprobaciones ROE,
+paradas de emergencia, ejecución de fases): el "operador" de cada decisión
+debe ser una IDENTIDAD REAL autenticada, no un campo de formulario editable.
+
+Diseño (sin dependencias externas, todo stdlib):
+- Contraseñas con scrypt (OWASP: n=2^14, r=8, p=1, dklen=32) y salt único.
+- Token JWT HS256 (RFC 7519) con expiración; secreto persistido en el
+  almacén de operadores (sobrevive a reinicios del servicio).
+- Almacén SQLite propio (USUARIOS_DB), separado de la memoria por caso.
+- Bloqueo temporal tras fallos repetidos de login (anti fuerza bruta).
+- Roles: admin (gestión del despliegue), gestor (gestión de caso en su
+  organización), operador (trabajo de caso) y lector (solo lectura).
+- Multi-tenant: cada cuenta pertenece a una ORGANIZACIÓN (tenant); los
+  casos llevan tenant y el aislamiento se aplica en la API.
+- Vinculación SSO OIDC opcional (sso_sub) para login federado.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+RUTA_DB = Path(os.environ.get("USUARIOS_DB", "usuarios.db"))
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS operadores (
+    usuario TEXT PRIMARY KEY,
+    hash TEXT NOT NULL,
+    rol TEXT NOT NULL DEFAULT 'operador',
+    tenant_id TEXT NOT NULL DEFAULT 'predeterminada',
+    sso_sub TEXT,
+    creado_en TEXT NOT NULL,
+    ultimo_acceso TEXT
+);
+CREATE TABLE IF NOT EXISTS organizaciones (
+    id TEXT PRIMARY KEY,
+    nombre TEXT NOT NULL,
+    creado_en TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS config (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auditoria_sistema (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor TEXT NOT NULL,
+    accion TEXT NOT NULL,
+    detalle TEXT DEFAULT '',
+    creado_en TEXT NOT NULL
+);
+"""
+
+SCRYPT_N, SCRYPT_R, SCRYPT_P, DKLEN = 2 ** 14, 8, 1, 32
+TOKEN_HORAS = float(os.environ.get("TOKEN_HORAS", "12"))
+MAX_FALLOS, VENTANA_FALLOS_S, BLOQUEO_S = 5, 600, 300
+
+TENANT_PREDETERMINADA = "predeterminada"
+# Jerarquía de roles (mayor número = más privilegios):
+#   lector    (1)  consulta el caso: hallazgos, evidencias, informes
+#   operador  (2)  trabaja el caso: fases, arsenal, hallazgos, aprobaciones
+#   gestor    (3)  gestiona el caso en su organización: crear/editar ROE
+#   admin     (4)  despliegue completo: organizaciones, cuentas, cross-tenant
+ROLES = ("admin", "gestor", "operador", "lector")
+NIVEL_ROL = {"lector": 1, "operador": 2, "gestor": 3, "admin": 4}
+
+
+def rol_nivel(rol: str) -> int:
+    return NIVEL_ROL.get((rol or "").strip().lower(), 0)
+
+
+def tiene_nivel(rol: str, minimo: int) -> bool:
+    return rol_nivel(rol) >= minimo
+
+# Registro en memoria de intentos fallidos: {usuario: [timestamps]}
+# Con PODA: un atacante que pruebe usuarios inexistentes no puede hacer
+# crecer el diccionario sin límite (las entradas caducadas se eliminan).
+_intentos: dict[str, list[float]] = {}
+_INTENTOS_MAX_CLAVES = 5_000
+
+
+def _registrar_intento(usuario: str) -> None:
+    ahora = time.time()
+    if len(_intentos) >= _INTENTOS_MAX_CLAVES:
+        for k in [k for k, v in _intentos.items()
+                  if not v or ahora - v[-1] >= VENTANA_FALLOS_S]:
+            del _intentos[k]
+        if len(_intentos) >= _INTENTOS_MAX_CLAVES:
+            antiguas = sorted(_intentos.items(), key=lambda kv: kv[1][-1])
+            for k, _ in antiguas[: _INTENTOS_MAX_CLAVES // 4]:
+                del _intentos[k]
+    _intentos.setdefault(usuario, []).append(ahora)
+
+
+# ---------------------------------------------------------------------------
+# Almacén
+# ---------------------------------------------------------------------------
+
+
+def _conexion() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(RUTA_DB), timeout=10)
+    conn.row_factory = sqlite3.Row
+    # Concurrencia: la API atiende peticiones en paralelo (threadpool) y el
+    # proxy relanza el backend bajo demanda; busy_timeout encola escritores
+    # en vez de fallar el login con "database is locked".
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.executescript(SCHEMA)
+    _migrar(conn)
+    conn.commit()
+    return conn
+
+
+def _migrar(conn: sqlite3.Connection) -> None:
+    """Migraciones idempotentes para despliegues previos a la v21:
+    columnas tenant_id/sso_sub y organización por defecto.
+    Un ALTER que ya se aplicó levanta OperationalError y se ignora."""
+    columnas = {f[1] for f in conn.execute("PRAGMA table_info(operadores)")}
+    if "tenant_id" not in columnas:
+        conn.execute(
+            "ALTER TABLE operadores ADD COLUMN tenant_id TEXT NOT NULL "
+            "DEFAULT 'predeterminada'")
+    if "sso_sub" not in columnas:
+        conn.execute("ALTER TABLE operadores ADD COLUMN sso_sub TEXT")
+    if not conn.execute(
+            "SELECT 1 FROM organizaciones WHERE id=?",
+            (TENANT_PREDETERMINADA,)).fetchone():
+        conn.execute(
+            "INSERT OR IGNORE INTO organizaciones (id, nombre, creado_en) "
+            "VALUES (?,?,?)",
+            (TENANT_PREDETERMINADA, "Organización por defecto", _ts()))
+
+
+def _secreto_jwt(conn: sqlite3.Connection) -> bytes:
+    """Secreto HS256 persistido: se genera una única vez por despliegue."""
+    fila = conn.execute("SELECT valor FROM config WHERE clave='secreto_jwt'").fetchone()
+    if fila:
+        return fila["valor"].encode()
+    secreto = secrets.token_hex(32)
+    conn.execute(
+        "INSERT OR REPLACE INTO config (clave, valor) VALUES ('secreto_jwt', ?)",
+        (secreto,))
+    conn.commit()
+    return secreto.encode()
+
+
+def _ts(dt: datetime | None = None) -> str:
+    return (dt or datetime.now(timezone.utc)).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Contraseñas (scrypt)
+# ---------------------------------------------------------------------------
+
+
+def _hash_contrasena(contrasena: str) -> str:
+    salt = secrets.token_bytes(16)
+    derivada = hashlib.scrypt(contrasena.encode(), salt=salt,
+                              n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=DKLEN)
+    return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${salt.hex()}${derivada.hex()}"
+
+
+def _verificar_contrasena(contrasena: str, guardada: str) -> bool:
+    try:
+        esquema, n, r, p, salt_hex, hash_hex = guardada.split("$")
+        if esquema != "scrypt":
+            return False
+        derivada = hashlib.scrypt(contrasena.encode(), salt=bytes.fromhex(salt_hex),
+                                  n=int(n), r=int(r), p=int(p), dklen=DKLEN)
+        return hmac.compare_digest(derivada.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# JWT HS256 (RFC 7519, implementación estándar sin dependencias)
+# ---------------------------------------------------------------------------
+
+
+def _b64url(datos: bytes) -> str:
+    return base64.urlsafe_b64encode(datos).rstrip(b"=").decode()
+
+
+def _b64url_decodificar(texto: str) -> bytes:
+    relleno = "=" * (-len(texto) % 4)
+    return base64.urlsafe_b64decode(texto + relleno)
+
+
+def emitir_token(usuario: str, rol: str,
+                 tenant: str = TENANT_PREDETERMINADA) -> dict[str, Any]:
+    """Emite un JWT firmado. Devuelve {token, expira_en}.
+
+    El claim `ten` (tenant/organización) viaja FIRMADO: un cliente no puede
+    cambiar de organización editando el token.
+    """
+    conn = _conexion()
+    try:
+        secreto = _secreto_jwt(conn)
+    finally:
+        conn.close()
+    ahora = int(time.time())
+    expira = ahora + int(TOKEN_HORAS * 3600)
+    cabecera = _b64url(json.dumps(
+        {"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    cuerpo = _b64url(json.dumps(
+        {"sub": usuario, "rol": rol, "ten": tenant,
+         "iat": ahora, "exp": expira,
+         "jti": secrets.token_hex(8)},
+        separators=(",", ":")).encode())
+    firma = _b64url(hmac.new(secreto, f"{cabecera}.{cuerpo}".encode(),
+                             hashlib.sha256).digest())
+    return {"token": f"{cabecera}.{cuerpo}.{firma}", "expira_en": expira}
+
+
+def verificar_token(token: str) -> Optional[dict[str, Any]]:
+    """Verifica firma y expiración del JWT. Devuelve claims o None."""
+    try:
+        cabecera_b64, cuerpo_b64, firma_b64 = token.split(".")
+        conn = _conexion()
+        try:
+            secreto = _secreto_jwt(conn)
+        finally:
+            conn.close()
+        firma_esperada = hmac.new(
+            secreto, f"{cabecera_b64}.{cuerpo_b64}".encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url(firma_esperada), firma_b64):
+            return None
+        cabecera = json.loads(_b64url_decodificar(cabecera_b64))
+        claims = json.loads(_b64url_decodificar(cuerpo_b64))
+        if cabecera.get("alg") != "HS256" or int(claims.get("exp", 0)) < time.time():
+            return None
+        return claims
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Cuentas de operador
+# ---------------------------------------------------------------------------
+
+
+def _validar_contrasena(contrasena: str) -> None:
+    if len(contrasena) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres")
+    if contrasena.lower() in ("password", "contrasena", "12345678", "changeme"):
+        raise ValueError("Contraseña trivial: elige una credencial real")
+
+
+def hay_operadores() -> bool:
+    conn = _conexion()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM operadores").fetchone()[0] > 0
+    finally:
+        conn.close()
+
+
+def crear_operador(usuario: str, contrasena: str, rol: str = "operador",
+                   tenant_id: str = TENANT_PREDETERMINADA,
+                   sso_sub: str | None = None) -> dict[str, Any]:
+    """Alta de operador. Validación de credencial, rol y organización."""
+    usuario = (usuario or "").strip()
+    # Regla explícita y amable: letras/números ASCII + . _ - (sin espacios).
+    # Antes se rechazaba el guion (-), un fallo fricción habitual al alta.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{3,32}", usuario):
+        raise ValueError(
+            "Usuario inválido: usa de 3 a 32 caracteres (letras, números, "
+            "punto, guion y guion bajo; sin espacios ni tildes)"
+        )
+    if rol not in ROLES:
+        raise ValueError("Rol inválido")
+    _validar_contrasena(contrasena)
+    tenant_id = (tenant_id or TENANT_PREDETERMINADA).strip().lower()
+    conn = _conexion()
+    try:
+        if not conn.execute("SELECT 1 FROM organizaciones WHERE id=?",
+                            (tenant_id,)).fetchone():
+            raise ValueError(
+                f"La organización '{tenant_id}' no existe (créala antes de "
+                "dar de alta cuentas en ella)")
+        conn.execute(
+            "INSERT INTO operadores (usuario, hash, rol, tenant_id, sso_sub, "
+            "creado_en) VALUES (?,?,?,?,?,?)",
+            (usuario, _hash_contrasena(contrasena), rol, tenant_id, sso_sub, _ts()))
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(f"El usuario '{usuario}' ya existe") from exc
+    finally:
+        conn.close()
+    return {"usuario": usuario, "rol": rol, "tenant_id": tenant_id,
+            "creado_en": _ts()}
+
+
+def verificar_credenciales(usuario: str, contrasena: str) -> Optional[dict[str, Any]]:
+    """Autenticación con bloqueo temporal tras fallos repetidos."""
+    usuario = (usuario or "").strip()
+    ahora = time.time()
+    fallos = [t for t in _intentos.get(usuario, []) if ahora - t < VENTANA_FALLOS_S]
+    if len(fallos) >= MAX_FALLOS and ahora - fallos[-1] < BLOQUEO_S:
+        restante = int(BLOQUEO_S - (ahora - fallos[-1]))
+        raise ValueError(f"Demasiados intentos fallidos: cuenta bloqueada {restante}s")
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, hash, rol, tenant_id FROM operadores WHERE usuario=?",
+            (usuario,)).fetchone()
+        if fila and _verificar_contrasena(contrasena, fila["hash"]):
+            _intentos.pop(usuario, None)
+            conn.execute("UPDATE operadores SET ultimo_acceso=? WHERE usuario=?",
+                         (_ts(), usuario))
+            conn.commit()
+            return {"usuario": fila["usuario"], "rol": fila["rol"],
+                    "tenant_id": fila["tenant_id"]}
+    finally:
+        conn.close()
+    _registrar_intento(usuario)
+    return None
+
+
+def cambiar_contrasena(usuario: str, actual: str, nueva: str) -> bool:
+    if not verificar_credenciales(usuario, actual):
+        return False
+    _validar_contrasena(nueva)
+    conn = _conexion()
+    try:
+        conn.execute("UPDATE operadores SET hash=? WHERE usuario=?",
+                     (_hash_contrasena(nueva), usuario))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def listar_operadores() -> list[dict[str, Any]]:
+    """Lista de cuentas (sin material sensible de credenciales)."""
+    conn = _conexion()
+    try:
+        filas = conn.execute(
+            "SELECT usuario, rol, tenant_id, sso_sub, creado_en, ultimo_acceso "
+            "FROM operadores ORDER BY creado_en").fetchall()
+        return [dict(f) for f in filas]
+    finally:
+        conn.close()
+
+
+def obtener_operador(usuario: str) -> Optional[dict[str, Any]]:
+    """Datos de una cuenta concreta (sin hash de credencial)."""
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, rol, tenant_id, sso_sub, creado_en, ultimo_acceso "
+            "FROM operadores WHERE usuario=?", (usuario,)).fetchone()
+        return dict(fila) if fila else None
+    finally:
+        conn.close()
+
+
+def eliminar_operador(usuario: str, peticionario: str) -> None:
+    """Baja de cuenta (solo admin).
+
+    Auto-baja: permitida SOLO cuando el peticionario es el ÚNICO operador
+    del despliegue — el cierre limpio de una cuenta temporal o la entrega
+    del despliegue reabren el bootstrap para el siguiente responsable. Si
+    quedan más operadores, la salida la firma otro admin: nunca se borra
+    a sí mismo sin testigo administrativo.
+    """
+    if usuario == peticionario:
+        conn = _conexion()
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM operadores").fetchone()[0]
+        finally:
+            conn.close()
+        if total > 1:
+            raise ValueError(
+                "Un operador no puede eliminar su propia cuenta con más "
+                "operadores activos: la baja la firma otro admin")
+        # Único operador: la auto-baja reabre el bootstrap (entrega limpia).
+    else:
+        conn = _conexion()
+        try:
+            fila = conn.execute(
+                "SELECT rol FROM operadores WHERE usuario=?", (usuario,)).fetchone()
+            if not fila:
+                raise ValueError(f"El usuario '{usuario}' no existe")
+            if fila["rol"] == "admin" and contar_admins() <= 1:
+                raise ValueError(
+                    "No se puede eliminar al último admin: el despliegue quedaría sin "
+                    "forma de gestionar operadores")
+        finally:
+            conn.close()
+    conn = _conexion()
+    try:
+        conn.execute("DELETE FROM operadores WHERE usuario=?", (usuario,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def contar_admins() -> int:
+    conn = _conexion()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM operadores WHERE rol='admin'").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def restablecer_contrasena(usuario: str, nueva: str) -> dict[str, Any]:
+    """Restablecimiento ADMINISTRATIVO de credencial (usuario afectado fuera
+    de sesión): fuerza una nueva contraseña sin conocer la anterior.
+
+    Herramienta de respuesta a incidentes de acceso; queda registrada la
+    fecha de última gestión en la propia cuenta."""
+    _validar_contrasena(nueva)
+    conn = _conexion()
+    try:
+        cur = conn.execute(
+            "UPDATE operadores SET hash=? WHERE usuario=?",
+            (_hash_contrasena(nueva), usuario))
+        conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+    finally:
+        conn.close()
+    _intentos.pop(usuario, None)  # desbloquea la cuenta tras el reset
+    return {"usuario": usuario, "restablecida": True}
+
+
+def cambiar_rol(usuario: str, rol: str, peticionario: str) -> dict[str, Any]:
+    """Cambio de rol (solo admin). Protege el acceso administrativo:
+    nadie puede quitarse admin a sí mismo ni degradar al último admin."""
+    if rol not in ROLES:
+        raise ValueError("Rol inválido")
+    if usuario == peticionario:
+        raise ValueError("Un admin no puede cambiar su propio rol (protección de bloqueo)")
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT rol FROM operadores WHERE usuario=?", (usuario,)).fetchone()
+        if not fila:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+        if fila["rol"] == "admin" and rol != "admin" and contar_admins() <= 1:
+            raise ValueError("No se puede degradar al último admin del despliegue")
+        conn.execute("UPDATE operadores SET rol=? WHERE usuario=?", (rol, usuario))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"usuario": usuario, "rol": rol}
+
+
+# ---------------------------------------------------------------------------
+# Auditoría de sistema (nivel despliegue, distinta de la auditoría por caso):
+# acciones administrativas que no viven dentro de un engagement concreto —
+# respaldos completos, gestión de cuentas. Append-only como la del caso.
+# ---------------------------------------------------------------------------
+
+def registrar_auditoria_sistema(actor: str, accion: str, detalle: str = "") -> None:
+    conn = _conexion()
+    try:
+        conn.execute(
+            "INSERT INTO auditoria_sistema (actor, accion, detalle, creado_en) "
+            "VALUES (?,?,?,?)",
+            (actor, accion, detalle, _ts()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Organizaciones (multi-tenant v21): los casos y las cuentas viven en una
+# organización; el aislamiento lo aplica la API. 'predeterminada' existe
+# siempre para despliegues mono-equipo.
+# ---------------------------------------------------------------------------
+
+
+_ID_ORG = re.compile(r"^[a-z0-9][a-z0-9._-]{1,40}$")
+
+
+def crear_organizacion(org_id: str, nombre: str) -> dict[str, Any]:
+    """Alta de organización (tenant). id: slug minúscula [a-z0-9._-]."""
+    org_id = (org_id or "").strip().lower()
+    nombre = (nombre or "").strip()
+    if not _ID_ORG.fullmatch(org_id):
+        raise ValueError(
+            "Id de organización inválido: 2-41 caracteres en minúscula "
+            "(letras, números, punto, guion y guion bajo)")
+    if not (2 <= len(nombre) <= 120):
+        raise ValueError("El nombre de la organización debe tener 2-120 caracteres")
+    conn = _conexion()
+    try:
+        conn.execute(
+            "INSERT INTO organizaciones (id, nombre, creado_en) VALUES (?,?,?)",
+            (org_id, nombre, _ts()))
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(f"La organización '{org_id}' ya existe") from exc
+    finally:
+        conn.close()
+    return {"id": org_id, "nombre": nombre, "creado_en": _ts()}
+
+
+def listar_organizaciones() -> list[dict[str, Any]]:
+    conn = _conexion()
+    try:
+        filas = conn.execute(
+            "SELECT o.id, o.nombre, o.creado_en, "
+            "(SELECT COUNT(*) FROM operadores op WHERE op.tenant_id=o.id) "
+            "AS operadores "
+            "FROM organizaciones o ORDER BY o.creado_en").fetchall()
+        return [dict(f) for f in filas]
+    finally:
+        conn.close()
+
+
+def organizacion_existe(org_id: str) -> bool:
+    conn = _conexion()
+    try:
+        return conn.execute("SELECT 1 FROM organizaciones WHERE id=?",
+                            (org_id,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def asignar_tenant(usuario: str, tenant_id: str) -> dict[str, Any]:
+    """Mueve una cuenta de organización (admin, cross-tenant)."""
+    tenant_id = (tenant_id or "").strip().lower()
+    conn = _conexion()
+    try:
+        if not conn.execute("SELECT 1 FROM organizaciones WHERE id=?",
+                            (tenant_id,)).fetchone():
+            raise ValueError(f"La organización '{tenant_id}' no existe")
+        cur = conn.execute(
+            "UPDATE operadores SET tenant_id=? WHERE usuario=?",
+            (tenant_id, usuario))
+        conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+    finally:
+        conn.close()
+    return {"usuario": usuario, "tenant_id": tenant_id}
+
+
+# ---------------------------------------------------------------------------
+# Vinculación SSO (OIDC): la identidad federada (claim `sub` del IdP) se
+# enlaza a una cuenta local. JIT (just-in-time): si llega un sub nuevo con
+# auto-alta activado se crea una cuenta LEATOR (mínimo privilegio) enlazada.
+# ---------------------------------------------------------------------------
+
+
+def obtener_por_sso(sso_sub: str) -> Optional[dict[str, Any]]:
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, rol, tenant_id, sso_sub FROM operadores "
+            "WHERE sso_sub=?", (sso_sub,)).fetchone()
+        return dict(fila) if fila else None
+    finally:
+        conn.close()
+
+
+def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
+                         tenant_id: str = TENANT_PREDETERMINADA,
+                         auto_alta: bool = True) -> dict[str, Any]:
+    """Resuelve el login SSO REAL: cuenta ya enlazada → devolverla;
+    usuario local existente sin enlace → enlazarlo (el nombre coincide);
+    cuenta nueva → alta JIT como 'lector' (o el rol indicado) si auto_alta.
+
+    El hash guardado es UNREACHABLE (el acceso federado no usa contraseña
+    local); se guarda un token imposible de reproducir para que un intento
+    de login con contraseña directa no coincida jamás.
+    """
+    existente = obtener_por_sso(sso_sub)
+    if existente:
+        return existente
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, rol, tenant_id FROM operadores WHERE usuario=?",
+            (usuario,)).fetchone()
+        if fila:
+            conn.execute("UPDATE operadores SET sso_sub=? WHERE usuario=?",
+                         (sso_sub, usuario))
+            conn.commit()
+            return {"usuario": fila["usuario"], "rol": fila["rol"],
+                    "tenant_id": fila["tenant_id"], "sso_sub": sso_sub}
+        if not auto_alta:
+            raise ValueError(
+                f"La identidad federada '{usuario}' no tiene cuenta en este "
+                "despliegue y el auto-alta SSO está desactivado")
+        conn.execute(
+            "INSERT INTO operadores (usuario, hash, rol, tenant_id, sso_sub, "
+            "creado_en) VALUES (?,?,?,?,?,?)",
+            (usuario,
+             "sso$federado$" + secrets.token_hex(32),  # inalcanzable por login
+             rol if rol in ROLES else "lector",
+             tenant_id if organizacion_existe(tenant_id) else TENANT_PREDETERMINADA,
+             sso_sub, _ts()))
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(f"El usuario '{usuario}' ya existe") from exc
+    finally:
+        conn.close()
+    return obtener_por_sso(sso_sub) or obtener_operador(usuario) or {
+        "usuario": usuario, "rol": rol, "tenant_id": tenant_id, "sso_sub": sso_sub}
+
+
+def listar_auditoria_sistema(limite: int = 200) -> list[dict[str, Any]]:
+    acotado = min(max(limite, 1), 1000)
+    conn = _conexion()
+    try:
+        filas = conn.execute(
+            "SELECT id, actor, accion, detalle, creado_en FROM auditoria_sistema "
+            "ORDER BY id DESC LIMIT ?", (acotado,)).fetchall()
+        return [dict(f) for f in filas]
+    finally:
+        conn.close()

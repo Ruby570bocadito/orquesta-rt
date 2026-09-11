@@ -1,0 +1,14 @@
+# Contexto de construcción de la consola: nunca en la imagen
+node_modules/
+.next/
+.git/
+.env
+.env.*
+db/
+usuarios.db
+logs/
+*.log
+download/
+platform/
+scripts/
+research/

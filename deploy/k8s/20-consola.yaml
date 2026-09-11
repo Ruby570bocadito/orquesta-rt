@@ -1,0 +1,102 @@
+# Despliegue de la consola (Next.js) + entrada HTTPS
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consola
+  namespace: orquesta-rt
+  labels:
+    app: consola
+    app.kubernetes.io/part-of: orquesta-rt
+spec:
+  replicas: 2   # la consola es stateless: escala horizontal real
+  selector:
+    matchLabels:
+      app: consola
+  template:
+    metadata:
+      labels:
+        app: consola
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: consola
+          # Sustituye por tu registro: registry.corp.local/orquesta/consola:v21
+          image: orquesta-rt/consola:v21
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: ORCHESTRATOR_URL
+              value: "http://orquestador:8000"
+            - name: NODE_ENV
+              value: "production"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: consola
+  namespace: orquesta-rt
+  labels:
+    app: consola
+spec:
+  selector:
+    app: consola
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+# Entrada TLS (ajusta clase de ingress y host a tu despliegue)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orquesta
+  namespace: orquesta-rt
+  annotations:
+    # La consola habla SSE con el orquestador vía proxy interno:
+    # desactiva timeouts agresivos del ingress para el flujo en vivo.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - consola.orquesta.local
+      secretName: orquesta-tls   # cert-manager o tu gestor de certificados
+  rules:
+    - host: consola.orquesta.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: consola
+                port:
+                  number: 3000

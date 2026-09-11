@@ -1,0 +1,41 @@
+LICENCIA PROPRIETARIA — ORQUESTA RT
+Plataforma de Red Team Orquestado por IA
+
+Copyright (c) 2026. Todos los derechos reservados.
+
+1. NATURALEZA DEL SOFTWARE
+   Este software es propietario y de código cerrado. El código fuente, la
+   documentación técnica, las skills, las plantillas de ROE y los artefactos
+   derivados son propiedad exclusiva del titular. Ninguna parte de este
+   repositorio puede copiarse, modificarse, distribuirse o publicarse sin
+   autorización expresa por escrito.
+
+2. USO PERMITIDO
+   El uso está limitado a operaciones de seguridad ofensiva (red team /
+   pentesting) expresamente AUTORIZADAS por el propietario de los sistemas
+   evaluados, bajo reglas de compromiso (ROE) firmadas y con despliegue
+   on-prem conforme al contrato de licencia.
+
+3. USO PROHIBIDO
+   - Cualquier uso contra sistemas sin autorización escrita del propietario.
+   - La eliminación, el puenteo o la manipulación de los controles de seguridad
+     del boundary (guardrails), de la auditoría inmutable o de la cadena de
+     custodia de evidencias.
+   - El uso como herramienta de ataque ofensivo fuera del marco profesional
+     de prueba de intrusión autorizada.
+
+4. MÓDULOS SENSIBLES
+   Los adaptadores de C2, explotación y phishing incluidos son interfaces de
+   integración con MOCKS de laboratorio, sin carga operativa ofensiva. La
+   conexión con tooling licenciado de terceros (Sliver, Mythic u otros) se
+   rige por la licencia de dichos productos y por el contrato comercial con
+   el titular de este software.
+
+5. GARANTÍA Y RESPONSABILIDAD
+   EL SOFTWARE SE ENTREGA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO. EL TITULAR
+   NO SERÁ RESPONSABLE DE DAÑOS DERIVADOS DE UN USO CONTRARIO A ESTA LICENCIA
+   O A LA LEGISLACIÓN APLICABLE.
+
+6. TERCEROS
+   Dependencias de terceros conservan sus licencias originales (ver
+   requirements.txt y package.json).

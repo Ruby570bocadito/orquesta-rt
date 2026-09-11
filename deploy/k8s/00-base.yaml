@@ -1,0 +1,52 @@
+# Namespace del despliegue OrquestaRT
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orquesta-rt
+  labels:
+    app.kubernetes.io/part-of: orquesta-rt
+---
+# Configuración NO sensible (los secretos van en el objeto Secret)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orquesta-config
+  namespace: orquesta-rt
+data:
+  RAIZ_CASOS: "/datos/casos"
+  RAIZ_SKILLS: "/app/skills"
+  USUARIOS_DB: "/datos/usuarios.db"
+  ORCHESTRATOR_URL: "http://orquestador:8000"
+  CONSOLE_ORIGINS: "https://consola.orquesta.local"
+  TOKEN_HORAS: "12"
+---
+# Secret: RELLÉNALO con los valores de tu despliegue (o usa ExternalSecrets/SealedSecrets).
+#   kubectl -n orquesta-rt create secret generic orquesta-secret \
+#     --from-literal=CLAVE_CASO='<hmac-evidencias-32+>' \
+#     --from-literal=API_FRONTERA_CLAVE='<clave-del-router-IA>' \
+#     --from-literal=OIDC_CLIENT_SECRET='<secreto-del-IdP>' \
+#     --from-literal=LDAP_BIND_CLAVE='<contrasena-ldap>' ...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orquesta-secret
+  namespace: orquesta-rt
+type: Opaque
+stringData:
+  # Valores PLACEHOLDER: sustitúyelos ANTES de aplicar (kubectl apply fallará
+  # en firmar evidencias con esta clave de ejemplo y esa es la idea).
+  CLAVE_CASO: "CAMBIAR-ME-clave-hmac-evidencias-32"
+  API_FRONTERA_CLAVE: "CAMBIAR-ME"
+---
+# Almacenamiento persistente: casos + cuentas (SQLite) sobreviven a los pods
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: datos-orquestador
+  namespace: orquesta-rt
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: <tu-clase-con-retención>   # descomentar si procede

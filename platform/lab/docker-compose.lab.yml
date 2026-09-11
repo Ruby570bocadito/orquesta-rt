@@ -1,0 +1,47 @@
+# =============================================================================
+# Lab simulado — objetivo ficticio para probar la plataforma de forma segura
+# -----------------------------------------------------------------------------
+# Levanta un "ACME Corporación" falso con nginx: sitio estático, robots.txt
+# con rutas reveladoras y cabeceras intencionadamente detectables.
+#
+#   docker compose -f docker-compose.lab.yml up -d
+#   curl -k https://localhost/            # portal falso
+#   curl -k https://localhost/robots.txt  # rutas del ejercicio
+#
+# El servidor MCP de recon (recon_server.py) apunta por defecto a este lab.
+# TODO aquí es ficticio: no hay sistema real al otro lado.
+# =============================================================================
+
+services:
+  lab-objetivo:
+    image: nginx:1.24-alpine
+    container_name: lab-acme-objetivo
+    ports:
+      - "8443:443"
+      - "8080:80"
+    volumes:
+      - ./objetivo/index.html:/usr/share/nginx/html/index.html:ro
+      - ./objetivo/robots.txt:/usr/share/nginx/html/robots.txt:ro
+      - ./objetivo/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - lab_certs:/etc/nginx/certs
+    environment:
+      - SERVIDOR_LAB=acme-demo (ficticio)
+    restart: unless-stopped
+
+  # Genera el certificado autofirmado del lab antes de arrancar nginx
+  lab-certificado:
+    image: alpine/openssl
+    container_name: lab-acme-cert
+    entrypoint: >
+      sh -c "
+        mkdir -p /certs &&
+        openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+          -keyout /certs/lab.key -out /certs/lab.pem \
+          -subj '/CN=lab.acme-demo.local' 2>/dev/null &&
+        echo 'Certificado del lab generado'
+      "
+    volumes:
+      - lab_certs:/certs
+
+volumes:
+  lab_certs:

@@ -1,0 +1,99 @@
+# Despliegue del orquestador (API FastAPI del núcleo)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orquestador
+  namespace: orquesta-rt
+  labels:
+    app: orquestador
+    app.kubernetes.io/part-of: orquesta-rt
+spec:
+  replicas: 1   # SQLite por caso: 1 réplica (escala vertical); multi-réplica exige PG
+  strategy:
+    type: Recreate   # RWO: el nuevo pod espera el volumen libre
+  selector:
+    matchLabels:
+      app: orquestador
+  template:
+    metadata:
+      labels:
+        app: orquestador
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: orquestador
+          # Sustituye por tu registro: registry.corp.local/orquesta/orquestador:v21
+          image: orquesta-rt/orquestador:v21
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: orquesta-config
+            - secretRef:
+                name: orquesta-secret
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          # Sondas REALES contra /api/salud (el mismo contrato que Docker)
+          livenessProbe:
+            httpGet:
+              path: /api/salud
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/salud
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: datos
+              mountPath: /datos
+            - name: tmp
+              mountPath: /tmp
+            - name: skills
+              mountPath: /app/skills
+              readOnly: true
+      volumes:
+        - name: datos
+          persistentVolumeClaim:
+            claimName: datos-orquestador
+        - name: tmp
+          emptyDir: {}
+        # Skills del equipo: monta aquí tu ConfigMap/CSI (o empaquétalas en la imagen)
+        - name: skills
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orquestador
+  namespace: orquesta-rt
+  labels:
+    app: orquestador
+spec:
+  selector:
+    app: orquestador
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
