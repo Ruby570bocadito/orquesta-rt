@@ -28,3 +28,15 @@ def _estado_auth_fresco(monkeypatch):
     monkeypatch.setattr(api_mod, "_limitador_auth",
                         api_mod._LimitadorTasa(10 ** 9))
     monkeypatch.setattr(auth_mod, "_intentos", {})
+
+
+@pytest.fixture(autouse=True)
+def _hogares_lab_para_tests(monkeypatch, tmp_path_factory):
+    """z3 (sesión 7, F37): el arsenal de persistencia está CONFINADO a los
+    hogares del lab (ORQUESTA_LAB_HOGARES). La suite implanta en tmp_path
+    de pytest: ese árbol se declara lab autorizado para cada test, igual
+    que un despliegue real declara sus hogares de laboratorio. La raíz
+    BASETEMP cubre todos los tmp_path y subdirectorios creados por los
+    tests (incluidos los que contienen espacios)."""
+    base = str(tmp_path_factory.getbasetemp())
+    monkeypatch.setenv("ORQUESTA_LAB_HOGARES", base)

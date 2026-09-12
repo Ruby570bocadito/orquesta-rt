@@ -15,6 +15,7 @@
 > | 4 | 2026-09-12 | [`sesion-4-mcp-superficie-y-endurecimiento.md`](sesion-4-mcp-superficie-y-endurecimiento.md) | Servidores MCP (SSRF osint, saneado LLM01, TLS fail-open, paquete inarrancable), superficie OpenAPI + path-traversal del proxy, revisión de núcleo/infra restante |
 > | 5 | 2026-09-12 | [`sesion-5-analitica-tenant-y-higiene-repo.md`](sesion-5-analitica-tenant-y-higiene-repo.md) | api.py completo (middleware/RBAC/admin/SSO/SSE), analítica cross-tenant (F31), material sensible en git: usuarios.db con secreto JWT (F32), cabeceras SMTP (F33), revisión de rutas.py/ldap/sso/copiloto/infra |
 > | 6 | 2026-09-12 | [`sesion-6-arsenal-ad-nombres-indefinidos.md`](sesion-6-arsenal-ad-nombres-indefinidos.md) | Módulos nunca auditados (arsenal AD, ctem, purpleteam, integraciones C2, consola Next.js) con análisis estático pyflakes: asrep() con NameError en su caso de uso (F34), dcsync() con `username` inexistente (F35), compactación de fases muerta por `import json` ausente (F36) + guarda sistémica anti-nombres-indefinidos |
+> | 7 | 2026-09-12 | [`sesion-7-confinamiento-persistencia.md`](sesion-7-confinamiento-persistencia.md) | Infra de despliegue (CI, install/supervisor, compose, Caddy, proxy, puente IA) y re-auditoría del arsenal: persistencia del lab con `raiz` sin confinar — escritura/activación en rutas arbitrarias del host, invisible para el boundary (F37) — remediada con lista blanca de hogares, raíz visible en la aprobación y testigo entrecomillado |
 
 ## Metodología
 
@@ -82,3 +83,4 @@
 | F34 | ALTO | 6 | Remediado (asrep(): línea muerta con `_enctype_table` inexistente eliminada — NameError/500 con cuentas roastables) |
 | F35 | MEDIO | 6 | Remediado (dcsync(): `username` → `usuario` — la herramienta nunca funcionó) |
 | F36 | BAJO | 6 | Remediado (graph.py: `import json` — compactación de fases ejecutable de nuevo; antes se tragaba en silencio) |
+| F37 | ALTO | 7 | Remediado (persistencia del lab confinada a hogares autorizados — ORQUESTA_LAB_HOGARES; la raíz viaja en los argumentos del boundary y el testigo va entrecomillado) |

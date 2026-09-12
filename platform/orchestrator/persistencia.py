@@ -28,16 +28,71 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-import secrets
+import shlex
 import subprocess
 import sys
-import tempfile
 from typing import Any
 
 MARCA = "# >>> orquesta-lab persistencia (ROE autorizado) >>>"
 MARCA_FIN = "# <<< orquesta-lab persistencia <<<"
 NOMBRE_UNIT = "orquesta-lab-persist.service"
 COMENTARIO_CLAVE_SSH = "orquesta-lab-persist"
+
+# z3 (auditoría sesión 7, F37): el parámetro `raiz` del arsenal de
+# persistencia define DÓNDE se escribe el implante (.bashrc, .ssh,
+# unidad systemd, testigo). Antes se aceptaba CUALQUIER directorio
+# existente del host: un operador autenticado (o el endpoint con un
+# `raiz` manipulado) podía implantar en /root, /home/ajeno o /etc —
+# escritura + activación de ejecución FUERA del laboratorio, y todo
+# ello INVISIBLE para el boundary, que solo evalúa `host: 127.0.0.1`.
+# El confinamiento es una lista blanca de hogares del lab:
+#   - ORQUESTA_LAB_HOGARES: rutas absolutas separadas por ":"
+#     (despliegues con usuarios de lab dedicados).
+#   - Por defecto: SOLO el HOME del usuario que ejecuta el orquestador
+#     (el comportamiento documentado del módulo).
+# Tanto la raíz pedida como la lista blanca pasan por os.path.realpath:
+# los enlaces simbólicos no permiten escapar (../ y symlinks se resuelven
+# antes de comparar).
+
+def _hogares_permitidos() -> list[str]:
+    """Hogares del lab donde la persistencia está autorizada."""
+    crudos = os.environ.get("ORQUESTA_LAB_HOGARES", "").strip()
+    if crudos:
+        candidatas = [p.strip() for p in crudos.split(":") if p.strip()]
+    else:
+        candidatas = [os.path.expanduser("~")]
+    permitidos: list[str] = []
+    for p in candidatas:
+        real = os.path.realpath(p)
+        if real and real not in permitidos:
+            permitidos.append(real)
+    return permitidos
+
+
+def _raiz_confinada(raiz: str | None) -> tuple[str | None, str | None]:
+    """Valida `raiz` contra la lista blanca del lab.
+
+    Devuelve (raiz_real, None) si está permitida o (None, error) si no.
+    Contrato del módulo: la raíz VACÍA/None significa "HOME del usuario
+    del lab" (el lab por defecto que el despliegue elige al elegir el
+    usuario que ejecuta el orquestador) y siempre está autorizada; una
+    raíz EXPLÍCITA debe pertenecer a la lista blanca de hogares
+    (ORQUESTA_LAB_HOGARES, que por defecto contiene el propio HOME).
+    """
+    if not (raiz or "").strip():
+        real = os.path.expanduser("~")
+        return (real, None) if os.path.isdir(real) else \
+            (None, f"la raíz {real} no existe en el host")
+    real = os.path.realpath(os.path.expanduser(raiz))
+    if not os.path.isdir(real):
+        return None, f"la raíz {real} no existe en el host"
+    for hogar in _hogares_permitidos():
+        if real == hogar or real.startswith(hogar + os.sep):
+            return real, None
+    return None, (f"raíz {real} fuera del laboratorio autorizado: la "
+                  "persistencia solo se implanta en los hogares del lab "
+                  "(ORQUESTA_LAB_HOGARES; por defecto el HOME del propio "
+                  "despliegue) — el ROE no cubre rutas fuera de él")
 
 
 def _marcador_activacion(raiz: str) -> str:
@@ -116,8 +171,11 @@ def _implantar_bashrc(comando: str, raiz: str) -> dict[str, Any]:
     # El implante es el wrapper COMPLETO: comando del operador + testigo de
     # activación. Así la prueba demuestra que el MECANISMO persistente se
     # ejecutó (el testigo se escribe dentro del propio bloque instalado).
+    # z3 (sesión 7): el testigo va ENTRECOMILLADO (shlex.quote) — una raíz
+    # con espacios partía la redirección y el testigo jamás se tocaba
+    # (falso negativo de activación en hogares de lab con espacios).
     bloque = (f"{MARCA}\n"
-              f"( {comando}; echo $(date +%s) >> {testigo} ) >/dev/null 2>&1\n"
+              f"( {comando}; echo $(date +%s) >> {shlex.quote(testigo)} ) >/dev/null 2>&1\n"
               f"{MARCA_FIN}\n")
     existente = ""
     if os.path.exists(ruta):
@@ -277,12 +335,18 @@ def implantar(metodo: str, comando: str, raiz: str | None = None,
               sitio: str | None = None, interprete: str | None = None) -> dict[str, Any]:
     """Implanta el método REAL sobre el host del lab (raíz = HOME del
     usuario del lab, por defecto el actual). Devuelve la prueba de
-    activación con lo que de verdad ocurrió."""
+    activación con lo que de verdad ocurrió.
+
+    z3 (sesión 7, F37): la raíz está CONFINADA a los hogares del lab
+    (ORQUESTA_LAB_HOGARES; por defecto el HOME del despliegue). Una raíz
+    fuera de la lista blanca se rechaza ANTES de tocar nada: ni escritura
+    ni activación fuera del laboratorio.
+    """
     if not comando or len(comando) > 400:
         return {"implantado": False, "error": "comando del beacon vacío o >400 caracteres"}
-    raiz = os.path.realpath(raiz or os.path.expanduser("~"))
-    if not os.path.isdir(raiz):
-        return {"implantado": False, "error": f"la raíz {raiz} no existe en el host"}
+    raiz, error = _raiz_confinada(raiz)
+    if error:
+        return {"implantado": False, "error": error}
     try:
         spec = _metodo(metodo)
     except KeyError:
@@ -314,8 +378,15 @@ def implantar(metodo: str, comando: str, raiz: str | None = None,
 
 def verificar(metodo: str, raiz: str | None = None,
               sitio: str | None = None, interprete: str | None = None) -> dict[str, Any]:
-    """Re-verifica la presencia y activación REAL del mecanismo."""
-    raiz = os.path.realpath(raiz or os.path.expanduser("~"))
+    """Re-verifica la presencia y activación REAL del mecanismo.
+
+    z3 (sesión 7, F37): misma lista blanca de hogares del lab que
+    implantar() — verificar también ejecuta el mecanismo (shell
+    interactivo) y lee ficheros de la raíz: fuera del lab, ni eso.
+    """
+    raiz, error = _raiz_confinada(raiz)
+    if error:
+        return {"verificado": False, "error": error}
     try:
         spec = _metodo(metodo)
     except KeyError:
@@ -382,8 +453,15 @@ def verificar(metodo: str, raiz: str | None = None,
 
 def retirar(metodo: str, raiz: str | None = None,
             sitio: str | None = None) -> dict[str, Any]:
-    """Limpieza REAL con verificación de ausencia. Higiene obligatoria."""
-    raiz = os.path.realpath(raiz or os.path.expanduser("~"))
+    """Limpieza REAL con verificación de ausencia. Higiene obligatoria.
+
+    z3 (sesión 7, F37): retirar REESCRIBE .bashrc y BORRA ficheros de la
+    raíz — la misma lista blanca del lab lo gobierna: la higiene no puede
+    usarse como excusa para tocar rutas fuera del alcance.
+    """
+    raiz, error = _raiz_confinada(raiz)
+    if error:
+        return {"retirado": False, "error": error}
     try:
         spec = _metodo(metodo)
     except KeyError:
@@ -450,8 +528,16 @@ def retirar(metodo: str, raiz: str | None = None,
 
 
 def estado(raiz: str | None = None, sitio: str | None = None) -> dict[str, Any]:
-    """Estado real de TODOS los métodos (lectura; sin activar nada)."""
-    raiz = os.path.realpath(raiz or os.path.expanduser("~"))
+    """Estado real de TODOS los métodos (lectura; sin activar nada).
+
+    z3 (sesión 7, F37): aunque es solo lectura, la raíz también queda
+    confinada — el estado expone presencia/hash de ficheros del hogar
+    consultado y no debe servir como sonda de rutas ajenas al lab.
+    """
+    raiz, error = _raiz_confinada(raiz)
+    if error:
+        return {"raiz": None, "error": error, "metodos": {},
+                "limpio_total": True}
     salida: dict[str, Any] = {"raiz": raiz, "metodos": {}}
     for spec in metodos_disponibles():
         nombre = spec["metodo"]

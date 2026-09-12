@@ -2080,7 +2080,12 @@ def arsenal_persistencia(engagement_id: str, p: PeticionPersistencia,
     identidad = operador_de(request)
     with _memoria_de(engagement_id) as memoria:
         roe, motor, fase, _fila = _guardrail_y_fase(engagement_id, memoria)
-        argumentos = {"host": "127.0.0.1", "metodo": p.metodo, "comando": p.comando}
+        # z3 (sesión 7, F37): la raíz del implante viaja en los argumentos
+        # que el boundary evalúa y AUDITA: la firma del operador ahora
+        # autoriza un destino concreto (lo que se muestra en la cola de
+        # aprobaciones), no solo "127.0.0.1" abstracto.
+        argumentos = {"host": "127.0.0.1", "metodo": p.metodo,
+                      "comando": p.comando, "raiz": p.raiz or "HOME del lab"}
         veredicto = motor.evaluar("persistencia.implantar", argumentos, fase,
                                   actor="humano")
         if veredicto.denegado:
@@ -2124,7 +2129,8 @@ def arsenal_persistencia_verificar(engagement_id: str, p: _PeticionPersistenciaA
         roe, motor, fase, _fila = _guardrail_y_fase(engagement_id, memoria)
         veredicto = motor.evaluar(
             "persistencia.verificar",
-            {"host": "127.0.0.1", "metodo": p.metodo}, fase, actor="humano")
+            {"host": "127.0.0.1", "metodo": p.metodo,
+             "raiz": p.raiz or "HOME del lab"}, fase, actor="humano")
         if veredicto.denegado:
             raise HTTPException(403, veredicto.motivo)
         return _ejecutar_persistencia(
@@ -2141,7 +2147,8 @@ def arsenal_persistencia_retirar(engagement_id: str, p: _PeticionPersistenciaAcc
         roe, motor, fase, _fila = _guardrail_y_fase(engagement_id, memoria)
         veredicto = motor.evaluar(
             "persistencia.retirar",
-            {"host": "127.0.0.1", "metodo": p.metodo}, fase, actor="humano")
+            {"host": "127.0.0.1", "metodo": p.metodo,
+             "raiz": p.raiz or "HOME del lab"}, fase, actor="humano")
         if veredicto.denegado:
             raise HTTPException(403, veredicto.motivo)
         return _ejecutar_persistencia(

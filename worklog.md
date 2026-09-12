@@ -899,7 +899,7 @@ Stage Summary:
 - Única parte viva del hallazgo: rotación de secreto_jwt y contraseña admin en despliegues derivados (z3, esta semana) y re-clon de los entornos de agentes antes de su próximo push.
 - Pendiente del operador: revocar el token cedido; opcional GitHub Support para vistas cacheadas de commits antiguos.
 
-Task ID: 35 (z3-sesión-6)
+Task ID: 36 (z3-sesión-6)
 Agent: z3 (auditoría de seguridad)
 Task: Sesión 6 de auditoría — módulos del backend nunca auditados a fondo (arsenal AD, ctem, purpleteam, sigma_valid, integraciones C2/Neo4j/NVD/LDAP, lab, consola Next.js) con análisis estático pyflakes como técnica nueva; remediación de defectos de ligado de nombres con tests de regresión y guarda sistémica.
 
@@ -919,7 +919,7 @@ Stage Summary:
 =======
 
 ---
-Task ID: 36 (Z2-ronda-8)
+Task ID: 37 (Z2-ronda-8)
 Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
 Task: Ronda 8 de pulimiento — realce del término de búsqueda en la vista Memoria (propuesta estrella de la sesión 06), construido sobre el fragmento corregido en la ronda 7. (Renumerado de 34 a 35 en el rebase: el ID 34 lo tomó antes z3-sesión-6 en main; rebase reconciliado sin debilitar ningún fix ajeno.)
 
@@ -940,7 +940,7 @@ Stage Summary:
 - Siguiente ronda propuesta (sesion-07): export Prometheus (quinta ronda deferido: decisión o retirada), reenvío manual de entregas fallidas (esquema de cargas), salud derivada por receptor, realce en títulos (marginal).
 
 ---
-Task ID: 36 (Z2-ronda-9)
+Task ID: 38 (Z2-ronda-9)
 Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
 Task: Ronda 9 de pulimiento — reenvío manual de entregas webhook fallidas (la propuesta más veterana de la cola, esperando desde la sesión 05 porque "exigía esquema nuevo").
 
@@ -960,3 +960,21 @@ Stage Summary:
 - 548 passed / 9 skipped (0 fallos), tsc 0, eslint 0.
 - Un evento webhook perdido YA NO se pierde: el operador lo reenvía con la carga fiel y ve el resultado en el historial — la propuesta en cola desde la sesión 05 queda cerrada.
 - Siguiente ronda propuesta (sesion-08): export Prometheus (quinta ronda deferido: decisión o retirada), salud derivada por receptor, reenvío en lote (deferido sin fecha), realce en títulos (marginal).
+
+
+Task ID: 39 (z3-sesión-7)
+Agent: z3 (auditoría de seguridad)
+Task: Sesión 7 de auditoría — infra de despliegue (CI, install/supervisor, compose, Caddy, proxy consola, puente IA) y re-auditoría del arsenal de persistencia con threat model del propio host; remediación del hallazgo F37 con tests de regresión E2E.
+
+Work Log:
+- Base: main 0fc4e8b (sesión 6 publicada). Lectura profunda de la infra nunca cubierta de frente: ci.yml, install.sh, dev-supervisor.sh, stop.sh, docker-compose.yml, Caddyfile, deploy/k8s, proxy /api/orchestrator/*, puente /api/ia, instrumentation.ts, lab/servidor_lab.py; y re-lectura completa de persistencia.py con la pregunta "¿qué puede tocar de verdad el endpoint en ESTE host?".
+- F37 (ALTO, persistencia.py + api.py): el campo `raiz` del arsenal de persistencia solo se sometía a realpath+isdir — cualquier directorio escribible del host era destino válido del implante (/root/.bashrc con activación real vía bash -i HOME=/root, authorized_keys de cuentas ajenas con clave privada devuelta en la respuesta, unidad systemd en /etc...). Agravante: el boundary evaluaba {"host": "127.0.0.1", ...} SIN la raíz — la firma del operador no veía el destino real (rompe la coincidencia EXACTA tool+argumentos del blueprint). Remediación: lista blanca de hogares del lab (ORQUESTA_LAB_HOGARES, por defecto SOLO el HOME del despliegue), _raiz_confinada con realpath en ambos lados (traversal y symlinks no escapan) aplicada en implantar/verificar/retirar/estado, "raiz" incluida en los argumentos que el boundary evalúa y audita en los tres endpoints, y testigo de activación entrecomillado con shlex.quote (hogares con espacios daban falso negativo de activación).
+- Hermano menor (MEDIO, mismo pase): `echo $(date +%s) >> {testigo}` sin entrecomillar en el bloque bashrc — corregido con shlex.quote.
+- Tests: platform/tests/test_z3_sesion7.py (8: rechazo fuera del lab en los 4 flujos, semántica por defecto HOME-only, hogar dedicado multi-home, traversal+symlink, raíz inexistente, espacios en el hogar con activación real, E2E por API donde la aprobación expone argumentos.raiz y /etc muere en el confinamiento tras pasar firma). conftest.py: fixture autouse declara el basetemp de pytest como lab autorizado — el flujo legítimo v20 (tmp_path) sigue en verde.
+- Entorno: instalados yara-python y ldap3 (opcionales ausentes en la máquina de auditoría desde la sesión 1): la suite completa pasa por primera vez SIN fallos de entorno. Limpieza de imports muertos heredados en persistencia.py (secrets/tempfile).
+- Superficie revisada SIN hallazgos: ci.yml (sin secretos ni pull_request_target), install.sh (set -euo pipefail, sin curl|bash), compose (loopback + no-new-privileges intactos), Caddyfile (transform :81 sigue ausente), proxy (guardia ../ e IP real no suplantable), puente IA (token 0600 + comparación constante), webhook (veto rebinding en 4 capas), busqueda/reporting/respaldo/ctem/threatled/razonador/purpleteam/sigma_valid (SQL parametrizado, sin escrituras con nombres del cliente, yaml.safe_load), usuarios.db fuera del índice git (F32 estable).
+- Suite completa: 535 passed / 8 skipped / 0 failed (base previa: 8 failed de entorno). DOCS: docs/agentes/agente-z3/sesion-7-confinamiento-persistencia.md + índice README y tabla F1-F37 + .env.example documentando ORQUESTA_LAB_HOGARES; este registro. Nada de otros agentes tocado.
+
+Stage Summary:
+- Total acumulado z3 → 37 fixes en 7 sesiones. El arsenal de persistencia ya no puede escribir ni activarse fuera del laboratorio declarado, y el operador firma el destino real (la raíz es visible en la aprobación y en la auditoría).
+- Pendiente de equipo (sin cambios): purga de historial git + rotación del secreto JWT de usuarios.db (F32); rotación del PAT de push.
