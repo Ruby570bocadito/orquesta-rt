@@ -1983,6 +1983,22 @@ export async function validarSigmaCaso(id: string): Promise<import("./tipos").Ve
     `/engagements/${id}/sigma/validar`, { method: "POST" });
 }
 
+/** Higiene de la PROPIA cuenta (v26): estado vivo (rol/organización
+ *  vigentes, corte de revocación) + identidad del token actual.
+ *  Superficie de usuario: cualquier rol autenticado la consulta. */
+export async function obtenerHigiene(): Promise<import("./tipos").HigieneCuenta> {
+  return api<import("./tipos").HigieneCuenta>("/auth/higiene");
+}
+
+/** «Cerrar sesión en todos los dispositivos» (v26): revoca TODO token
+ *  emitido antes de ahora, incluido el actual — al confirmar el 200 se
+ *  limpia la sesión local igual que en el cierre ordinario. La credencial
+ *  NO se toca (no es un restablecimiento administrativo). */
+export async function cerrarSesionesPropias(): Promise<void> {
+  await api("/auth/sesion/cerrar-todas", { method: "POST" });
+  usarConsola.getState().cerrarSesion();
+}
+
 /** Copia de seguridad completa del sistema (solo admin): BDs + manifiesto SHA-256. */
 export async function descargarRespaldoCompleto(): Promise<string> {
   const r = await fetch(`${BASE}/admin/respaldo-completo`, {

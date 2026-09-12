@@ -38,6 +38,7 @@ import { VistaArsenal } from "@/components/consola/arsenal";
 import { VistaCasos } from "@/components/consola/casos";
 import { VistaCopiloto } from "@/components/consola/copiloto";
 import { VistaRazonamiento } from "@/components/consola/razonamiento";
+import { DialogoHigiene } from "@/components/consola/higiene";
 import { VistaEquipo } from "@/components/consola/equipo";
 import { VistaTecnicas } from "@/components/consola/tecnicas";
 import { VistaCadenas } from "@/components/consola/cadenas";
@@ -817,6 +818,9 @@ function BarraSuperior({
   const refrescar = usarConsola((s) => s.refrescar);
   const sesion = usarConsola((s) => s.sesion);
   const cerrarSesion = usarConsola((s) => s.cerrarSesion);
+  // Higiene de la cuenta (v26): estado local de la cabecera — el chip de
+  // sesión abre el diálogo con el estado vivo y el cierre global.
+  const [higieneAbierta, setHigieneAbierta] = useState(false);
 
   const completada = engagement?.estado_fase === "completada";
   // Ejecutar está disponible cuando no hay firmas pendientes y el ciclo no
@@ -950,18 +954,26 @@ function BarraSuperior({
               </button>
             )}
 
-            {/* Sesión del operador autenticado */}
+            {/* Sesión del operador autenticado: el chip abre la higiene
+                de la cuenta (v26): estado vivo + cerrar-todas. */}
             {sesion && (
               <div
                 className="flex h-8 items-center gap-2 rounded-lg border border-line bg-panel pl-2 pr-1 sm:pl-2.5"
                 title={`Sesión: ${sesion.usuario} (${sesion.rol})`}
               >
-                <span className="hidden h-5 w-5 items-center justify-center rounded-full bg-raised font-mono text-[9px] font-bold uppercase text-crimson-bright sm:flex">
-                  {sesion.usuario.slice(0, 2)}
-                </span>
-                <span className="hidden max-w-24 truncate text-xs text-zinc-300 md:inline">
-                  {sesion.usuario}
-                </span>
+                <button
+                  onClick={() => setHigieneAbierta(true)}
+                  className="flex items-center gap-2 rounded-md px-0.5 py-0.5 transition-colors hover:opacity-80"
+                  aria-label="Abrir higiene de la cuenta"
+                  title="Higiene de la cuenta"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-raised font-mono text-[9px] font-bold uppercase text-crimson-bright">
+                    {sesion.usuario.slice(0, 2)}
+                  </span>
+                  <span className="hidden max-w-24 truncate text-xs text-zinc-300 md:inline">
+                    {sesion.usuario}
+                  </span>
+                </button>
                 <button
                   onClick={cerrarSesion}
                   className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-raised hover:text-red-300"
@@ -993,6 +1005,9 @@ function BarraSuperior({
           </span>
         </div>
       </div>
+
+      {/* Higiene de la cuenta (v26): abierto desde el chip de sesión. */}
+      <DialogoHigiene abierto={higieneAbierta} onCerrar={() => setHigieneAbierta(false)} />
     </header>
   );
 }

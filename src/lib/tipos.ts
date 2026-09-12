@@ -557,3 +557,29 @@ export interface VeredictoSigma {
   motor: string;
   reglas: ReglaVeredictoSigma[];
 }
+
+// ---------------------------------------------------------------------------
+// Higiene de la propia cuenta (v26): estado vivo + identidad del token
+// ---------------------------------------------------------------------------
+
+/** Identidad del JWT con el que se consulta el panel. */
+export interface HigieneToken {
+  emision: number | null;
+  expira_en: number | null;
+  segundos_restantes: number | null;
+  /** Validez ante el corte de revocación de sesiones (z3-F4). */
+  sesion_valida: boolean;
+}
+
+/** Estado de higiene de la PROPIA cuenta (GET /api/auth/higiene):
+ * rol y organización VIGENTES en la BD, fechas y corte de revocación.
+ * Sin material sensible (nunca hashes ni secretos). */
+export interface HigieneCuenta {
+  usuario: string;
+  rol: string;
+  tenant_id: string;
+  creado_en: string;
+  ultimo_acceso: string | null;
+  invalidar_antes: number;
+  token: HigieneToken;
+}
