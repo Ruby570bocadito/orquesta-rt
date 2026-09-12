@@ -537,3 +537,23 @@ export interface RespuestaNvd {
   nota?: string;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Validación Sigma en vivo (v25): veredicto del endpoint /sigma/validar
+// ---------------------------------------------------------------------------
+
+export interface ReglaVeredictoSigma {
+  nombre: string;
+  valida: boolean;
+  errores: string[];
+  avisos: string[];
+}
+
+export interface VeredictoSigma {
+  total: number;
+  validas: number;
+  invalidas: number;
+  sin_fuente: string[];
+  motor: string;
+  reglas: ReglaVeredictoSigma[];
+}

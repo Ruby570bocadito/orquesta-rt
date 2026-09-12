@@ -247,9 +247,14 @@ informe en español ✔ · SSO + multi-tenant + despliegue Docker/K8s ✔.
 
 Siguiente:
 
-- **UI de validación Sigma en la consola** (el endpoint `POST /sigma/validar` y el veredicto en el ZIP ya existen; falta el panel).
 - **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
 - **Cierre del bucle purple**: delta CTEM refleje cambios de detección al desplegar reglas Sigma validadas.
+
+Completado en v25:
+
+- **Escudo anti-inyección indirecta (OWASP LLM01:2025)** en el copiloto: los fragmentos RAG del caso viajan entre delimitadores `<<RAG …>>` declarados como canal NO CONFIABLE en el prompt de sistema (regla 8) y los patrones de instrucción embedida (8 familias, español e inglés) se marcan en línea como dato sin borrar evidencia. La línea "ESCUDO LLM01" del contexto declara cuántas marcas aplicó.
+- **UI de validación Sigma en la consola**: panel "detection-as-code (Sigma)" en Hallazgos que consume `POST /sigma/validar` y pinta el veredicto por regla (errores bloquean, avisos educan) + técnicas sin fuente de logs.
+- **MISP de laboratorio en la plantilla de entorno**: bloque dedicado en `lab/env_laboratorio.ejemplo.sh` (`MISP_URL=http://localhost:8444`) y pySigma como dependencia opcional documentada.
 
 Completado en v24:
 

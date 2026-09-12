@@ -34,3 +34,7 @@ pyyaml>=6.0
 
 # Opcional: índice vectorial local para RAG del caso (descomentar si se desea)
 # chromadb>=0.5
+
+# Opcional: validación Sigma PROFUNDA con pySigma (sigma_valid.py la usa si
+# está instalada; sin ella la validación estructural funciona sin dependencias)
+# pysigma>=0.29

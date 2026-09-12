@@ -622,3 +622,22 @@ Stage Summary:
 - El enriquecimiento threat-intel es ahora ejercitable de extremo a extremo en cualquier laboratorio: `MISP_URL=http://localhost:8444 MISP_KEY=clave-lab-misp` y el conector oficial habla con un servidor real del protocolo MISP.
 - Las reglas Sigma del paquete purple llegan con veredicto auditable dentro del ZIP: detection-as-code verificable en el momento de la entrega.
 - Siguiente (propuestas en docs/agentes/z1.md): UI de validación en consola, guion E2E del enriquecimiento con el lab, ingestión del dominio real al motor Neo4j y cierre CTEM↔purple↔Sigma.
+
+---
+Task ID: 25
+Agent: z1 (agente colaborador, bitácora en docs/agentes/z1/)
+Task: Ronda v25 — re-implementación y publicación del escudo anti-inyección indirecta OWASP LLM01:2025 en el copiloto (recuperado de una sesión previa no publicada), UI de validación Sigma en la consola, MISP de lab en la plantilla de entorno y reorganización de la bitácora del agente en docs/agentes/z1/ con todas las sesiones.
+
+Work Log:
+- AUDITORÍA DE PARTIDA: sincronizado con origin (main @ 11be212, v24 + fixes z3). Verificado en vivo: (a) el escudo LLM01 de la primera sesión NO está en el repo (trabajo no publicado; la revocación de sesión sí quedó cubierta por z3-F4 con otro diseño — se documenta y se descarta la variante propia); (b) el endpoint sigma/validar de v24 no tenía UI; (c) la plantilla de entorno no documentaba el MISP de lab y pySigma no figuraba como opcional.
+- ESCUDO LLM01 (copiloto.py): regla 8 del SISTEMA declara el canal <<RAG>>…<</RAG>> como NO CONFIABLE; _FAMILIAS_INYECCION con 8 heurísticas (sobreescritura, cambio de rol, falso sistema <|im_start|>/[INST]/system:, falso JSON con sugerencias, exfiltración verbo+secreto, manipulación ROE/informe, falso cierre de contexto, suplantación de hablante) en español e inglés; _COMBINADO_INYECCION un solo pase (sin re-marcado anidado); _blindar_fragmento marca en línea ⟨dato⟩ SIN borrar evidencia (quitar decoraciones recupera el texto EXACTO, con test que lo exige); construir_contexto delimita cada fragmento y añade línea honesta "ESCUDO LLM01: N patrón(es)" solo si hubo marcas. Truncado antes de marcar para que la marca siempre quede bien formada (riesgo residual del corte documentado).
+- UI SIGMA (manejo del usuario web): tipos.ts (VeredictoSigma/ReglaVeredictoSigma), store.ts (validarSigmaCaso vía api<T>), datos.tsx: PanelSigma en Hallazgos junto a la tira purple — botón Validar, resumen N de M + motor + técnicas sin fuente, veredicto por regla con errores (bloquean) y avisos (educan), error inline para RBAC 403 (el lector ve el mensaje del permiso que falta).
+- LAB: lab/env_laboratorio.ejemplo.sh con bloque MISP DE LABORATORIO (MISP_URL=http://localhost:8444, clave-lab-misp, MISP_SSL=0 + comando compose); requirements.txt con # pysigma>=0.29 opcional (patrón sliver-py/chromadb).
+- TESTS (test_v25.py, 17): 8 familias × (marca única + fidelidad exacta), benigno intacto, multi-familia sin anidamiento, variaciones caso/acentos, falsas coincidencias legítimas sin marcar («ignora el certificado», «excluido del alcance»), delimitadores en contexto, línea ESCUDO solo con marcas, sin coincidencias honesto, regla 8 en SISTEMA.
+- VALIDACIÓN: suite completa 338 passed / 8 skipped / 10 failed con diff de fallos contra baseline (git stash + doble pasada) = VACÍO (cero regresiones); tsc 0; eslint 0 en ficheros tocados.
+- DOCUMENTACIÓN: README (roadmap v25: escudo LLM01 + UI Sigma + MISP lab), bitácora REORGANIZADA a docs/agentes/z1/ (README + sesion-01-primeras-rondas.md + sesion-02-v25-*.md) con z1.md como índice de rastro, y este registro.
+Stage Summary:
+- El copiloto queda blindado contra inyección indirecta (LLM01:2025) con la estrategia OWASP de spotlighting: separación de canal + marcado de patrones + anti-invención (la evidencia no se destruye, se anota).
+- El operador valida las reglas Sigma desde la consola con veredicto por regla, cerrando la propuesta nº 1 de v24; el lab MISP queda documentado en la puerta de entrada del despliegue.
+- Bitácora del agente reorganizada según instrucción del operador: docs/agentes/z1/ contiene TODAS las sesiones (una por fichero).
+- Siguiente (propuestas en docs/agentes/z1/sesion-02): endurecer _partir_estructura frente a eco de JSON, ingestión Neo4j del dominio real, bucle CTEM↔purple↔Sigma y panel de sesiones de usuario en la consola.

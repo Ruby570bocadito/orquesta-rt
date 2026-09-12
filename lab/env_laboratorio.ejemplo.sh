@@ -33,3 +33,11 @@
 #export MISP_URL="https://misp.su-dominio.com"
 #export MISP_KEY="CAMBIE-ESTA-CLAVE-DE-API"
 #export MISP_SSL="1"            # "0" solo para labs con certificado propio
+
+# --- MISP DE LABORATORIO (v24) ----------------------------------------------
+# Servidor compatible con la API real de MISP con intel semilla del lab
+# (arranque: docker compose -f platform/lab/docker-compose.lab.yml up lab-misp).
+# Ejercita el enriquecimiento end-to-end SIN una instancia productiva:
+#export MISP_URL="http://localhost:8444"
+#export MISP_KEY="clave-lab-misp"
+#export MISP_SSL="0"
