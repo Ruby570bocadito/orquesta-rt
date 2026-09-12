@@ -325,6 +325,47 @@ def sesion_viva(claims: dict[str, Any]) -> bool:
     return True
 
 
+def higiene_cuenta(usuario: str) -> Optional[dict[str, Any]]:
+    """Estado de higiene de la PROPIA cuenta (v26, panel de la consola).
+
+    Lo que un usuario puede ver de sí mismo sin material sensible: rol y
+    organización VIGENTES (los del middleware de revocación, no los del
+    token), fechas de alta/último acceso y el corte `invalidar_antes`.
+    Los claims del token se añaden en la API (capa de presentación)."""
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, rol, tenant_id, creado_en, ultimo_acceso, "
+            "invalidar_antes FROM operadores WHERE usuario=?", (usuario,)).fetchone()
+        return dict(fila) if fila else None
+    finally:
+        conn.close()
+
+
+def revocar_sesiones_propias(usuario: str) -> dict[str, Any]:
+    """«Cerrar sesión en TODOS los dispositivos» de la propia cuenta (v26).
+
+    Fija `invalidar_antes` al instante actual SIN tocar la credencial:
+    todos los JWT emitidos antes mueren — INCLUIDO el de quien lo pide
+    (semántica estándar de sign-out-everywhere; el cliente limpia su
+    sesión local al recibir el 200 y vuelve a entrar con credenciales).
+    La credencial sigue siendo válida: esto NO es un restablecimiento.
+    """
+    corte = time.time()
+    conn = _conexion()
+    try:
+        cur = conn.execute(
+            "UPDATE operadores SET invalidar_antes=? WHERE usuario=?",
+            (corte, usuario))
+        conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+    finally:
+        conn.close()
+    _invalidar_cache_sesion(usuario)
+    return {"usuario": usuario, "corte": corte}
+
+
 # ---------------------------------------------------------------------------
 # Cuentas de operador
 # ---------------------------------------------------------------------------

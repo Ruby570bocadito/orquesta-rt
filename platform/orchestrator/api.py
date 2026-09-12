@@ -2265,6 +2265,60 @@ def auth_contrasena(p: PeticionContrasena, request: Request) -> dict[str, Any]:
     return {"cambiada": True}
 
 
+@app.get("/api/auth/higiene")
+def auth_higiene(request: Request) -> dict[str, Any]:
+    """Panel de higiene de la PROPIA cuenta (v26, manejo del usuario web).
+
+    Junta el estado VIVO de la cuenta (rol/organización vigentes según el
+    middleware de revocación de z3-F4, no los claims congelados del token)
+    con la identidad del token que consulta (emisión, caducidad, validez).
+    Sin material sensible: fechas y banderas, nunca hashes ni secretos.
+    Cualquier rol autenticado puede consultar SU propia higiene."""
+    claims = getattr(request.state, "operador", None) or {}
+    usuario = str(claims.get("sub") or "")
+    estado = auth.higiene_cuenta(usuario)
+    if estado is None:
+        raise HTTPException(404, "La cuenta ya no existe")
+    exp = claims.get("exp")
+    iat = claims.get("iat")
+    ahora = int(time.time())
+    return {
+        **estado,
+        "token": {
+            "emision": iat,
+            "expira_en": exp,
+            "segundos_restantes": max(0, int(exp or 0) - ahora) if exp else None,
+            "sesion_valida": auth.sesion_viva(claims),
+        },
+    }
+
+
+@app.post("/api/auth/sesion/cerrar-todas")
+def auth_cerrar_sesiones(request: Request) -> dict[str, Any]:
+    """«Cerrar sesión en todos los dispositivos» de la PROPIA cuenta (v26).
+
+    Revoca TODO token emitido antes de ahora, incluido el que hace la
+    petición (semántica sign-out-everywhere): la consola limpia su sesión
+    local al recibir el 200. La credencial NO se toca — no es un
+    restablecimiento; para eso está el canal administrativo de z3."""
+    claims = getattr(request.state, "operador", None) or {}
+    usuario = str(claims.get("sub") or "")
+    _guardar_rate(request, ":cerrar-sesiones")
+    try:
+        corte = auth.revocar_sesiones_propias(usuario)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    auth.registrar_auditoria_sistema(
+        usuario or "desconocido", "sesion.cierre_global",
+        f"corte de sesiones fijado en {corte['corte']:.0f} (epoch)")
+    return {
+        "cerradas": True,
+        "corte": corte["corte"],
+        "aviso": ("Todas las sesiones de tu cuenta quedan revocadas "
+                  "(también esta); vuelve a iniciar sesión."),
+    }
+
+
 @app.get("/api/auth/operadores")
 def auth_operadores(request: Request) -> list[dict[str, Any]]:
     """Listado de cuentas autenticadas (sin material sensible). SOLO ADMIN:
