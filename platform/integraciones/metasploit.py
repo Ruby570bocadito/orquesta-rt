@@ -9,6 +9,8 @@ Configuración (variables de entorno del backend):
   MSF_HOST    host de msfrpcd (por defecto 127.0.0.1)
   MSF_PORT    puerto RPC (por defecto 55553)
   MSF_SSL     "1" si msfrpcd corre con TLS
+  MSF_TLS_VERIFICAR  "1" (por defecto) verifica el certificado TLS del RPC;
+              "0" desactiva la verificación (solo labs con autofirmado)
   MSF_USER    usuario RPC (`msfrpcd -U ...`)
   MSF_PASS    contraseña RPC
 
@@ -33,6 +35,10 @@ class RpcMsf:
         self.ssl = os.environ.get("MSF_SSL", "") == "1"
         self.usuario = os.environ.get("MSF_USER", "")
         self.clave = os.environ.get("MSF_PASS", "")
+        # z3 (auditoría seguridad): el RPC transporta el login y el token de
+        # sesión de msfrpcd. La verificación del certificado es POR DEFECTO;
+        # MSF_TLS_VERIFICAR=0 la desactiva conscientemente (labs autofirmados).
+        self.verificar_tls = os.environ.get("MSF_TLS_VERIFICAR", "1") != "0"
         if not self.usuario or not self.clave:
             raise RuntimeError(
                 "Metasploit RPC no configurado: defina MSF_HOST, MSF_PORT, "
@@ -48,7 +54,7 @@ class RpcMsf:
         if self._token is None:
             self._login()
         mensaje = msgpack.packb([self._token, metodo, *args], use_bin_type=True)
-        with httpx.Client(timeout=60, verify=False) as c:
+        with httpx.Client(timeout=60, verify=self.verificar_tls) as c:
             r = c.post(self.url, content=mensaje,
                        headers={"Content-Type": "binary/message-pack"})
         r.raise_for_status()
@@ -59,7 +65,7 @@ class RpcMsf:
         import msgpack
         mensaje = msgpack.packb(
             ["msg", "auth.login", self.usuario, self.clave], use_bin_type=True)
-        with httpx.Client(timeout=20, verify=False) as c:
+        with httpx.Client(timeout=20, verify=self.verificar_tls) as c:
             r = c.post(self.url, content=mensaje,
                        headers={"Content-Type": "binary/message-pack"})
         r.raise_for_status()

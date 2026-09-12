@@ -13,6 +13,8 @@ Configuración (variables de entorno del backend):
   SMTP_CLAVE      contraseña SMTP
   SMTP_REMITENTE  dirección de envío acordada con el cliente
   SMTP_TLS        "1" obliga STARTTLS (por defecto) — "0" lo desactiva
+  SMTP_TLS_SIN_VERIFICAR  "1" desactiva la verificación del certificado en
+                  STARTTLS (solo labs autofirmados); por defecto se verifica
 
 Sin infraestructura SMTP configurada, el envío queda documentado como
 requisito: la plataforma nunca simula entregas ni métricas de apertura.
@@ -60,7 +62,16 @@ def enviar(destinatarios: list[str], asunto: str, cuerpo: str,
             mensaje.set_content(cuerpo)
         with smtplib.SMTP(cfg["host"], cfg["puerto"], timeout=25) as smtp:
             if cfg["tls"]:
-                smtp.starttls()
+                # z3 (auditoría seguridad): STARTTLS SIN contexto explícito no
+                # verifica el certificado del servidor — un MITM activo podría
+                # interceptar SMTP_CLAVE y el contenido de la campaña. Se
+                # verifica por defecto; SMTP_TLS_SIN_VERIFICAR=1 solo en labs.
+                import ssl as _ssl
+                if os.environ.get("SMTP_TLS_SIN_VERIFICAR", "") == "1":
+                    ctx = _ssl._create_unverified_context()  # noqa: SLF001 - escape documentado
+                else:
+                    ctx = _ssl.create_default_context()
+                smtp.starttls(context=ctx)
             smtp.login(cfg["usuario"], cfg["clave"])
             rechazados = smtp.send_message(mensaje)
         return {"enviado": True, "total": len(destinatarios),

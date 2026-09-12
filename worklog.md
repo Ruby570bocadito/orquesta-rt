@@ -578,3 +578,25 @@ Stage Summary:
 - 5 hallazgos críticos/altos + 5 medios remediados con backwards-compat (migraciones idempotentes, clave legada de custodia, tests existentes en verde).
 - ACCIONES PENDIENTES DEL EQUIPO: rotar secreto_jwt (publicado), tratar datos de casos publicados como brecha, y decidir purge de historial git (filter-repo + force-push).
 - Detalle completo en docs/agentes/z3.md.
+
+---
+Task ID: z3-sesion-2
+Agent: z3 (agente de revisión de código y seguridad)
+Task: Profundización de la auditoría (remediación de P2 de la sesión 1 + nuevas superficies), fixes profesionales, tests de regresión y publicación en GitHub
+
+Work Log:
+- Superficies revisadas a fondo: platform/integraciones/ (metasploit, bloodhound, mythic, misp, smtp_envio, nvd, rutas), platform/mcp/ (recon, osint, evidencias, c2_adapter), transportes.py completo, respaldo.py, sidecar.py, evasion.py, ad.py, persistencia.py, middleware/RUTAS_PUBLICAS y /api/salud en api.py. Lo sólido verificado y documentado (Cypher parametrizado, SQL del webhook controlado, validador de dominios del ROE, EmailMessage anti header-injection, MCP stdio no expuestos).
+- F11 MEDIO: 17 clientes HTTP con verify=False hardcodeado (los de infraestructura propia viajan con credenciales) → integraciones MSF/BloodHound/Mythic verifican POR DEFECTO con escape consciente (*_TLS_VERIFICAR=0); recon/OSINT con política centralizada transportes.verificar_tls()/_cliente_http() + RECON_TLS_ESTRICTO=1; servidores MCP importan la misma política.
+- F12 ALTO: secuestro de cuentas vía SSO (preferred_username coincidente heredaba el rol local, p. ej. admin) → vínculo de cuentas gestor/admin exige pre-aprobación explícita (nueva tabla sso_vinculos_preaprobados con caducidad 30 días, comandos CLI sso-preaprobar/sso-vinculos, auditoría sso.preaprobacion/vinculo/alta_jit); OIDC_DOMINIOS_PERMITIDOS exige email federado verificado para altas y vínculos; lector/operador sin variables nuevas: comportamiento intacto.
+- F13 MEDIO: /api/salud pública devolvía estado_backends() completo (URLs de backends IA, modelos, rutas de BDs) → anónimo recibe solo {estado, servicio, version}; detalle completo solo con Bearer vivo (HEALTHCHECK y sidecar no se afectan).
+- F14 MEDIO: STARTTLS SMTP sin contexto → create_default_context() por defecto, escape SMTP_TLS_SIN_VERIFICAR=1 para labs.
+- F15 BAJO: guardia de inyección de argumentos en nmap (objetivo que empieza por '-'); el validador del ROE ya era la defensa primaria, el transporte ahora también.
+- F16 BAJO: platform/.env.example era referenciado por README/compose pero nunca existió en el repo → creado SIN secretos con catálogo completo de variables + excepción en .gitignore.
+- Tests: platform/tests/test_z3_sesion2.py (17 casos, httpx.Client interceptado para afirmar el verify real, sin red saliente) → 17/17; suite completa 302 passed / 8 skipped con los 10 fallos preexistentes del entorno (yara/ldap3 ausentes), cero regresiones.
+- Documentación: sección Sesión 2 en docs/agentes/z3.md (acumulativa, sin tocar la sesión 1) y nueva entrada en este worklog.
+- Publicación: commit en rama z3/auditoria-seguridad-sesion1 (incluye sesión 1 + 2), push a origin y fast-forward de main para integrar los fixes.
+
+Stage Summary:
+- Sesión 2: 1 hallazgo ALTO (SSO account takeover) + 3 MEDIOS + 2 BAJOS remediados; todas las recomendaciones P2 de la sesión 1 quedan cerradas o mitigadas.
+- La plataforma queda con TLS seguro por defecto en integraciones con credenciales, SSO inmune al registro previo de nombres en el IdP y sin fugas de topología en endpoints públicos.
+- Siguientes sugeridas por z3: definir OIDC_DOMINIOS_PERMITIDOS en producción, evaluar purge de historial git (BDs publicadas en sesión 1) y mover el JWT de localStorage a cookie httpOnly a medio plazo.

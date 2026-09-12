@@ -30,6 +30,37 @@ PUERTOS_PERMITIDOS = {80, 443, 8080, 8443, 22, 445, 3389, 8000, 5432, 3306, 53}
 
 PUERTOS_HTTPS = {443, 8443}
 
+
+def verificar_tls() -> bool:
+    """z3 (auditoría seguridad): verificación TLS de los sondeos de recon.
+
+    Por defecto los clientes HTTP del recon/OSINT no verifican el
+    certificado del objetivo (los labs del alcance usan autofirmados y una
+    anomalía de certificado es en sí un hallazgo del engagement). Un
+    despliegue serio contra infraestructura real puede activar la
+    verificación completa:
+
+        RECON_TLS_ESTRICTO=1   →  verify=True en todos los sondeos
+
+    NOTA: esto NO afecta a las integraciones de infraestructura propia
+    (metasploit/bloodhound/mythic/misp), que verifican POR DEFECTO con
+    escape explícito (ver integraciones/*.py).
+    """
+    import os
+    return os.environ.get("RECON_TLS_ESTRICTO", "") == "1"
+
+
+def _cliente_http(**kwargs):
+    """httpx.Client con la política TLS de recon ya aplicada.
+
+    El valor de `verify` se fuerza desde aquí salvo que el caller lo pase
+    explícito (no debería): evita que un verify=False quede hardcoded y
+    silencioso en una herramienta nueva.
+    """
+    import httpx
+    kwargs.setdefault("verify", verificar_tls())
+    return httpx.Client(**kwargs)
+
 # Banner grab: primera lectura del servicio; puertos que hablan primero.
 _BANNER_TAM = 512
 
@@ -115,7 +146,7 @@ def osint_robots_txt(dominio: str, roe: ROEPolitica,
     solicitados = [int(p) for p in puertos.replace(" ", "").split(",") if p.isdigit()]
     try:
         import httpx
-        with httpx.Client(timeout=6, verify=False, follow_redirects=True) as c:
+        with _cliente_http(timeout=6, follow_redirects=True) as c:
             for puerto in sorted(set(solicitados) & PUERTOS_PERMITIDOS):
                 url = f"{_url_de(host, puerto)}/robots.txt"
                 try:
@@ -212,7 +243,7 @@ def recon_http_probe(url: str, roe: ROEPolitica) -> dict[str, Any]:
     try:
         import httpx
         destino = url if url.startswith("http") else f"https://{url}"
-        with httpx.Client(verify=False, timeout=8, follow_redirects=False) as c:
+        with _cliente_http(timeout=8, follow_redirects=False) as c:
             r = c.get(destino)
         cabeceras = {k.lower(): v for k, v in r.headers.items()
                      if k.lower() in ("server", "x-powered-by", "content-type",
@@ -267,7 +298,7 @@ def recon_tech_fingerprint(url: str, roe: ROEPolitica) -> dict[str, Any]:
     try:
         import httpx
         destino = url if url.startswith("http") else f"https://{url}"
-        with httpx.Client(verify=False, timeout=8) as c:
+        with _cliente_http(timeout=8) as c:
             r = c.get(destino)
     except Exception as exc:
         return {"url": url, "error": str(exc)[:200]}
@@ -420,7 +451,7 @@ def recon_http_methods(url: str, roe: ROEPolitica) -> dict[str, Any]:
     try:
         import httpx
         destino = url if url.startswith("http") else f"https://{url}"
-        with httpx.Client(verify=False, timeout=8, follow_redirects=False) as c:
+        with _cliente_http(timeout=8, follow_redirects=False) as c:
             r = c.options(destino)
         permitidos = [m.strip().upper() for m in
                       r.headers.get("allow", r.headers.get("access-control-allow-methods", "")).split(",")
@@ -448,7 +479,7 @@ def recon_dir_index(url: str, roe: ROEPolitica, rutas: str = "") -> dict[str, An
         destino_base = url if url.startswith("http") else f"https://{url}"
         abiertos: list[dict[str, Any]] = []
         consultadas: list[str] = []
-        with httpx.Client(verify=False, timeout=6, follow_redirects=False) as c:
+        with _cliente_http(timeout=6, follow_redirects=False) as c:
             for ruta in lista:
                 destino = destino_base.rstrip("/") + ruta
                 consultadas.append(destino)
@@ -550,7 +581,7 @@ def osint_sitemap(dominio: str, roe: ROEPolitica, maximo: int = 100) -> dict[str
         import httpx
         base = f"https://{host}" if "." in host else f"https://{dominio}"
         for candidato in ("/sitemap.xml", "/sitemap_index.xml"):
-            with httpx.Client(verify=False, timeout=10, follow_redirects=True) as c:
+            with _cliente_http(timeout=10, follow_redirects=True) as c:
                 r = c.get(base + candidato)
             if r.status_code != 200 or "<urlset" not in r.text and "<sitemapindex" not in r.text:
                 continue
@@ -590,7 +621,7 @@ def recon_rutas_sensibles(url: str, roe: ROEPolitica) -> dict[str, Any]:
         base = url if url.startswith("http") else f"https://{url}"
         expuestas: list[dict[str, Any]] = []
         probadas: list[str] = []
-        with httpx.Client(verify=False, timeout=6, follow_redirects=False) as c:
+        with _cliente_http(timeout=6, follow_redirects=False) as c:
             for ruta in _RUTAS_SENSIBLES:
                 destino = base.rstrip("/") + ruta
                 probadas.append(destino)
@@ -807,6 +838,13 @@ def recon_nmap_servicios(host: str, roe: ROEPolitica,
                 "error": "nmap no está instalado en el host del orquestador: "
                          "instálalo (apt install nmap) para detección de servicios "
                          "profunda; mientras tanto usa recon.port_scan (sockets)"}
+    # z3 (auditoría seguridad): inyección de argumentos. `destino` se pasa
+    # como último parámetro de nmap; si empezara por '-' nmap lo interpretaría
+    # como opción (p. ej. -iL/-oX con fichero arbitrario) en vez de objetivo.
+    # El alcance del ROE normalmente lo impide, pero es defensa en profundidad.
+    if destino.startswith("-"):
+        return {"host": destino, "servicios": [],
+                "error": "objetivo inválido para nmap (no puede empezar por '-')"}
     if puertos:
         solicitados = {int(p) for p in puertos.replace(" ", "").split(",") if p.isdigit()}
     else:

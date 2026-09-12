@@ -268,17 +268,26 @@ def canjear_codigo(code: str, state: str) -> dict[str, Any]:
     usuario = _re.sub(r"[^A-Za-z0-9._-]", "_", str(identidad))[:32].lower()
     if len(usuario) < 3:
         usuario = f"sso_{usuario or 'user'}"
-    cuenta = _resolver_cuenta(str(claims.get("sub", usuario)), usuario)
+    cuenta = _resolver_cuenta(str(claims.get("sub", usuario)), usuario, claims)
     return cuenta
 
 
-def _resolver_cuenta(sso_sub: str, usuario: str) -> dict[str, Any]:
-    """Enlaza o crea la cuenta local (JIT lector por defecto)."""
+def _resolver_cuenta(sso_sub: str, usuario: str,
+                     claims: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Enlaza o crea la cuenta local (JIT lector por defecto).
+
+    z3 (auditoría seguridad): los claims del id_token (email / email_verified)
+    acompañan a la resolución para que la política de dominios de confianza
+    (OIDC_DOMINIOS_PERMITIDOS en auth.crear_o_vincular_sso) pueda aplicarse.
+    """
     from . import auth
     tenant = os.environ.get("OIDC_TENANT", auth.TENANT_PREDETERMINADA)
+    c = claims or {}
     return auth.crear_o_vincular_sso(
         sso_sub=sso_sub, usuario=usuario, rol=OIDC_ROL_JIT,
-        tenant_id=tenant, auto_alta=OIDC_AUTO_ALTA)
+        tenant_id=tenant, auto_alta=OIDC_AUTO_ALTA,
+        email=str(c.get("email") or ""),
+        email_verificado=bool(c.get("email_verified")))
 
 
 def desconectar_url() -> Optional[str]:

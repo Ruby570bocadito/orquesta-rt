@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# z3: la plantilla SIN secretos sí viaja en el repo (la referencian
+# README.md y docker-compose.yml como cp platform/.env.example platform/.env)
+!platform/.env.example
 
 # vercel
 .vercel

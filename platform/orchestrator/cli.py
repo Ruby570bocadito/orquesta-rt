@@ -221,5 +221,43 @@ def auditoria_sistema(limite: int = typer.Option(
     console.print(tabla)
 
 
+@app.command("sso-preaprobar")
+def sso_preaprobar(usuario: str = typer.Argument(help="Cuenta local a enlazar"),
+                   sso_sub: str = typer.Argument(
+                       help="Identidad federada (claim `sub` del IdP) autorizada")) -> None:
+    """Pre-aprueba el vínculo SSO de una identidad federada con una cuenta.
+
+    z3 (auditoría seguridad): las cuentas gestor/admin EXIGEN esta
+    pre-aprobación para enlazarse por SSO (nadie hereda una cuenta por
+    coincidencia de nombre con el IdP). Caduca a los 30 días si no se usa.
+    """
+    from . import auth as _auth
+    try:
+        resultado = _auth.preaprobar_vinculo_sso("cli:admin", usuario, sso_sub)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]Vínculo pre-aprobado:[/green] {resultado['usuario']} ← {resultado['sso_sub']}")
+
+
+@app.command("sso-vinculos")
+def sso_vinculos() -> None:
+    """Lista los vínculos SSO pre-aprobados pendientes de consumo."""
+    from . import auth as _auth
+    vinculos = _auth.listar_vinculos_preaprobados()
+    if not vinculos:
+        console.print("[dim]Sin pre-aprobaciones pendientes.[/dim]")
+        return
+    tabla = Table(title="Vínculos SSO pre-aprobados (caducan a los 30 días)")
+    tabla.add_column("Cuenta local")
+    tabla.add_column("sso_sub", overflow="fold")
+    tabla.add_column("Aprobado por")
+    tabla.add_column("Fecha (UTC)")
+    for v in vinculos:
+        tabla.add_row(v["usuario"], v["sso_sub"], v["creado_por"],
+                      v["creado_en"][:19])
+    console.print(tabla)
+
+
 if __name__ == "__main__":
     app()

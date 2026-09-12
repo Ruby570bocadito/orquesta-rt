@@ -442,10 +442,16 @@ class PeticionAvanzar(BaseModel):
 
 
 @app.get("/api/salud")
-def salud() -> dict[str, Any]:
+def salud(request: Request) -> dict[str, Any]:
     """Chequeo de salud con componentes REALES (para monitorización y
     HEALTHCHECK de Docker): memoria de casos, base de operadores y
-    configuración del router IA (sin pings salientes ni secretos)."""
+    configuración del router IA (sin pings salientes ni secretos).
+
+    z3 (auditoría seguridad): la ruta es pública (Docker/sidecar la sondean
+    sin token), pero el DETALLE de los componentes revela topología interna
+    (rutas de BDs, URL de los backends IA, estado de los circuitos). Un
+    llamador SIN token válido recibe solo el estado agregado; el detalle
+    completo exige sesión de operador autenticada."""
     # Guardián de resiliencia en cada chequeo de salud: si la consola Next.js
     # está caída, el sidecar la relanza desde este proceso (que sobrevive a
     # los ciclos del servidor de desarrollo).
@@ -454,6 +460,19 @@ def salud() -> dict[str, Any]:
         asegurar_consola()
     except Exception:
         pass
+    autenticado = False
+    cabecera = request.headers.get("Authorization", "")
+    if cabecera.startswith("Bearer "):
+        claims = auth.verificar_token(cabecera[7:])
+        autenticado = bool(claims and auth.sesion_viva(claims))
+    if not autenticado:
+        # Mínimo necesario para monitorización anónima (HEALTHCHECK,
+        # instrumentation.ts): un booleano y nada de topología.
+        ok_basico = (RAIZ_CASOS.exists()
+                     and Path(os.environ.get("DB_USUARIOS",
+                                             "usuarios.db")).exists())
+        return {"estado": "ok" if ok_basico else "degradado",
+                "servicio": "orquestador", "version": app.version}
     componentes: dict[str, Any] = {
         "api": {"ok": True},
         "memoria_casos": {

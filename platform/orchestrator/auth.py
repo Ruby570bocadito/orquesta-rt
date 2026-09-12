@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS auditoria_sistema (
     detalle TEXT DEFAULT '',
     creado_en TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sso_vinculos_preaprobados (
+    usuario TEXT PRIMARY KEY,
+    sso_sub TEXT NOT NULL,
+    creado_por TEXT NOT NULL,
+    creado_en TEXT NOT NULL
+);
 """
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P, DKLEN = 2 ** 14, 8, 1, 32
@@ -660,9 +666,13 @@ def obtener_por_sso(sso_sub: str) -> Optional[dict[str, Any]]:
 
 def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
                          tenant_id: str = TENANT_PREDETERMINADA,
-                         auto_alta: bool = True) -> dict[str, Any]:
+                         auto_alta: bool = True,
+                         email: str = "",
+                         email_verificado: bool = False) -> dict[str, Any]:
     """Resuelve el login SSO REAL: cuenta ya enlazada → devolverla;
-    usuario local existente sin enlace → enlazarlo (el nombre coincide);
+    usuario local existente sin enlace → enlazarlo SOLO si la política lo
+    permite (z3: cuentas privilegiadas exigen pre-aprobación explícita y,
+    si hay dominio de confianza configurado, email federado verificado);
     cuenta nueva → alta JIT como 'lector' (o el rol indicado) si auto_alta.
 
     El hash guardado es UNREACHABLE (el acceso federado no usa contraseña
@@ -672,15 +682,43 @@ def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
     existente = obtener_por_sso(sso_sub)
     if existente:
         return existente
+    # z3 (auditoría seguridad): si el despliegue declara dominios de email
+    # de confianza (OIDC_DOMINIOS_PERMITIDOS), cualquier alta o vínculo
+    # automático exige un email federado VERIFICADO de uno de esos dominios.
+    # Sin esa comprobación, un IdP con autorregistro abierto podría crear
+    # 'admin' y heredar la cuenta local del mismo nombre (secuestro de
+    # cuenta vía SSO).
+    dominios = _dominios_sso_permitidos()
+    if dominios:
+        dominio_email = (email.split("@")[-1].lower().strip()
+                         if "@" in email else "")
+        if not email_verificado or dominio_email not in dominios:
+            raise ValueError(
+                "SSO: se exige un email federado verificado de los dominios "
+                f"autorizados ({', '.join(sorted(dominios))}) para "
+                "vincular o dar de alta la identidad")
     conn = _conexion()
     try:
         fila = conn.execute(
             "SELECT usuario, rol, tenant_id FROM operadores WHERE usuario=?",
             (usuario,)).fetchone()
         if fila:
+            if rol_nivel(fila["rol"]) >= 3 and not _vinculo_preaprobado(
+                    conn, fila["usuario"], sso_sub):
+                # Cuentas gestor/admin: el nombre federado que coincide NO
+                # basta. Un admin debe pre-aprobar el vínculo explícitamente
+                # (CLI: orquesta sso-preaprobar <usuario> <sso_sub>).
+                raise ValueError(
+                    f"SSO: la cuenta local privilegiada '{usuario}' exige "
+                    "pre-aprobación explícita de un admin antes de enlazar "
+                    "una identidad federada (orquesta sso-preaprobar)")
             conn.execute("UPDATE operadores SET sso_sub=? WHERE usuario=?",
                          (sso_sub, usuario))
             conn.commit()
+            registrar_auditoria_sistema(
+                f"sso:{sso_sub}", "sso.vinculo",
+                f"identidad federada enlazada a la cuenta local "
+                f"'{usuario}' (rol {fila['rol']})")
             return {"usuario": fila["usuario"], "rol": fila["rol"],
                     "tenant_id": fila["tenant_id"], "sso_sub": sso_sub}
         if not auto_alta:
@@ -696,12 +734,94 @@ def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
              tenant_id if organizacion_existe(tenant_id) else TENANT_PREDETERMINADA,
              sso_sub, _ts()))
         conn.commit()
+        registrar_auditoria_sistema(
+            f"sso:{sso_sub}", "sso.alta_jit",
+            f"alta JIT federada '{usuario}' (rol {rol if rol in ROLES else 'lector'}, "
+            f"tenant {tenant_id if organizacion_existe(tenant_id) else TENANT_PREDETERMINADA})")
     except sqlite3.IntegrityError as exc:
         raise ValueError(f"El usuario '{usuario}' ya existe") from exc
     finally:
         conn.close()
     return obtener_por_sso(sso_sub) or obtener_operador(usuario) or {
         "usuario": usuario, "rol": rol, "tenant_id": tenant_id, "sso_sub": sso_sub}
+
+
+def _dominios_sso_permitidos() -> set[str]:
+    """Dominios de email federado de confianza (OIDC_DOMINIOS_PERMITIDOS).
+
+    Vacío = sin restricción de dominio (comportamiento previo); con valor,
+    'a.com, b.com' restringe altas y vínculos SSO a emails verificados de
+    esos dominios.
+    """
+    bruto = os.environ.get("OIDC_DOMINIOS_PERMITIDOS", "")
+    return {d.strip().lower().lstrip("@.") for d in bruto.split(",")
+            if d.strip()} - {""}
+
+
+def _vinculo_preaprobado(conn: sqlite3.Connection, usuario: str,
+                         sso_sub: str) -> bool:
+    conn.execute("DELETE FROM sso_vinculos_preaprobados WHERE creado_en<?",
+                 (_ts_gracia_vinculos(),))
+    return conn.execute(
+        "SELECT 1 FROM sso_vinculos_preaprobados WHERE usuario=? AND sso_sub=?",
+        (usuario, sso_sub)).fetchone() is not None
+
+
+def _ts_gracia_vinculos() -> str:
+    """Los pre-aprobados no usados caducan a los 30 días (higiene)."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+
+def preaprobar_vinculo_sso(actor: str, usuario: str, sso_sub: str) -> dict[str, Any]:
+    """Autorización EXPLÍCITA de un admin para enlazar una identidad
+    federada (sub del IdP) con una cuenta local existente. Obligatorio
+    para cuentas gestor/admin; recomendado para cualquier vínculo.
+    Caduca a los 30 días si no se consume."""
+    conn = _conexion()
+    try:
+        fila = conn.execute("SELECT rol FROM operadores WHERE usuario=?",
+                            (usuario,)).fetchone()
+        if not fila:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+        conn.execute(
+            "INSERT OR REPLACE INTO sso_vinculos_preaprobados "
+            "(usuario, sso_sub, creado_por, creado_en) VALUES (?,?,?,?)",
+            (usuario, sso_sub, actor, _ts()))
+        conn.commit()
+    finally:
+        conn.close()
+    registrar_auditoria_sistema(
+        actor, "sso.preaprobacion",
+        f"vínculo federado pre-aprobado: cuenta '{usuario}' ← sub '{sso_sub}'")
+    return {"usuario": usuario, "sso_sub": sso_sub}
+
+
+def listar_vinculos_preaprobados() -> list[dict[str, Any]]:
+    conn = _conexion()
+    try:
+        filas = conn.execute(
+            "SELECT usuario, sso_sub, creado_por, creado_en "
+            "FROM sso_vinculos_preaprobados ORDER BY creado_en").fetchall()
+        return [dict(f) for f in filas]
+    finally:
+        conn.close()
+
+
+def eliminar_vinculo_preaprobado(actor: str, usuario: str) -> int:
+    conn = _conexion()
+    try:
+        cur = conn.execute(
+            "DELETE FROM sso_vinculos_preaprobados WHERE usuario=?", (usuario,))
+        conn.commit()
+        eliminados = cur.rowcount
+    finally:
+        conn.close()
+    if eliminados:
+        registrar_auditoria_sistema(
+            actor, "sso.preaprobacion_baja",
+            f"pre-aprobación de vínculo federado retirada: '{usuario}'")
+    return eliminados
 
 
 def listar_auditoria_sistema(limite: int = 200) -> list[dict[str, Any]]:
