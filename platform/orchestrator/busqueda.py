@@ -100,13 +100,33 @@ class IndiceBM25:
                 for i in orden[:limite] if puntuaciones[i] > 0]
 
 
+def _normalizar_1a1(texto: str) -> str:
+    """Normalización IDÉNTICA a la de tokenizar pero 1:1 por carácter.
+
+    tokenizar quita tildes (búsqueda tolerante); el fragmento necesita
+    LOCALIZAR esa misma coincidencia sobre el texto original. Como cada
+    sustitución (á→a, ü→u, …) y el lower() en español conservan la longitud,
+    las posiciones encontradas en el gemelo valen para recortar el original.
+    (z2, ronda 7: antes el fragmento buscaba el término SIN normalizar sobre
+    el contenido crudo y una consulta acentuada — o viceversa — no encontraba
+    la posición y el recorte caía en la cabecera del documento, no en la
+    coincidencia que BM25 sí había puntuado.)
+    """
+    texto = texto.lower()
+    for origen, destino in (("á", "a"), ("é", "e"), ("í", "i"),
+                            ("ó", "o"), ("ú", "u"), ("ü", "u")):
+        texto = texto.replace(origen, destino)
+    return texto
+
+
 def _fragmento(contenido: str, consulta: str, radio: int = 90) -> str:
-    """Recorte contextual del contenido alrededor de la primera coincidencia."""
+    """Recorte contextual del contenido alrededor de la primera coincidencia
+    (con la MISMA tolerancia a tildes que el índice BM25)."""
     contenido = (contenido or "").strip().replace("\n", " ")
     if len(contenido) <= radio * 2:
         return contenido
     terminos = tokenizar(consulta)
-    bajo = contenido.lower()
+    bajo = _normalizar_1a1(contenido)
     for t in terminos:
         pos = bajo.find(t)
         if pos >= 0:

@@ -839,3 +839,21 @@ Stage Summary:
 - 518 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
 - El receptor muerto se ve en su tarjeta sin abrir nada; los pings de prueba tienen su propia cuota y el tráfico real conserva su ventana íntegra de 100.
 - Siguiente ronda propuesta (sesion-05): export Prometheus (decidir o retirar del roadmap), estado de salud derivado por receptor (umbrales por tipo de receptor), reenvío manual de entrega fallida (exige esquema nuevo), ETIQUETA_EVENTO compartida (YAGNI, vigilar).
+
+---
+Task ID: 33 (Z2-ronda-7)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 7 de pulimiento — diversificación fuera del dominio webhook: búsqueda en memoria del caso. Defecto corregido: el fragmento mostrado al operador no localizaba la coincidencia que BM25 sí había puntuado cuando consulta y contenido diferían en tildes.
+
+Work Log:
+- Base: main 79f32a1 (ronda 6 publicada). Línea base verificada: 518 passed / 8 skipped.
+- INVESTIGACIÓN: barrido de módulos sin pulir reciente (busqueda.py, flujo de borrado de casos — no existe: decisión de producto, excepciones silenciosas, colisión de ids resumen: — despreciable con microsegundos).
+- Z1 (busqueda.py): _fragmento buscaba el término SIN normalizar sobre contenido.lower() mientras tokenizar quita tildes en ambos lados del índice — consulta "enumeracion" contra "enumeración" → find() == -1 → el recorte caía en la CABECERA del documento en vez del pasaje relevante (la vista Memoria renderiza fragmento tal cual). Fix: _normalizar_1a1() — gemelo del contenido con el mismo mapeo que tokenizar; como cada sustitución y el lower() español son 1:1 por carácter, las posiciones del gemelo valen para recortar el original (invariante fijado por test).
+- TESTS (+4, test_v31_z2.py): consulta sin tildes sobre contenido con tildes (y viceversa), invariante de longitud/posiciones del gemelo, E2E buscar_caso con fragmento centrado en el pasaje. Los 4 fallan contra el código anterior (fijan el defecto, no el accidente).
+- DEFERIDO/DESCARTADO (sesion-06): colisión resumen:{creado_en} (despreciable), degradación silenciosa de embeddings (metodo "bm25" ya es honesto), reenvío manual de entregas fallidas (esquema nuevo), borrado de casos (producto, no defecto).
+- DOCS: docs/agentes/z2/sesion-06-ronda-7.md + índice del README de la carpeta + z2.md (punta de rastro) actualizados; este registro.
+
+Stage Summary:
+- 522 passed / 8 skipped (0 fallos). Sin cambios de TypeScript: tsc/eslint como en la base.
+- La búsqueda del caso muestra fragmentos que corresponden a la coincidencia real — la misma tolerancia a tildes del índice, ahora también en lo que ve el operador.
+- Siguiente ronda propuesta (sesion-06): reenvío manual de entregas webhook fallidas (esquema), export Prometheus (cuarta ronda deferido: decidir o retirar), salud derivada por receptor, realce del término en la vista Memoria (trivial sobre el fragmento corregido).
