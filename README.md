@@ -250,6 +250,11 @@ Siguiente:
 - **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
 - **Cierre del bucle purple**: delta CTEM refleje cambios de detección al desplegar reglas Sigma validadas.
 
+Completado en v26:
+
+- **Cierre del eco de JSON en el copiloto (LLM01, salida)**: el bloque de sugerencias ya no se elige "el último que parsea" sino el último NO-ECO del canal de datos — un `​```json```​` copiado de un fragmento RAG jamás aporta sugerencias aunque sea lo último de la respuesta (procedencia validada contra el contexto entregado, insensible a las marcas del escudo). Cada sugerencia valida además su canal contra el contrato real de la plataforma (fases F0-F7 + aprobación + informe); un canal desconocido degrada a aprobación humana. Nueva regla 5b: el bloque es la última palabra del modelo.
+- **Higiene de la propia cuenta en la consola**: `GET /api/auth/higiene` (estado vivo: rol/organización vigentes según el middleware de revocación, emisión y caducidad del JWT, corte de sesiones) y `POST /api/auth/sesion/cerrar-todas` (sign-out-everywhere: revoca todo token emitido antes de ahora, auditado). Panel accesible desde el chip de sesión de la cabecera, para cualquier rol autenticado.
+
 Completado en v25:
 
 - **Escudo anti-inyección indirecta (OWASP LLM01:2025)** en el copiloto: los fragmentos RAG del caso viajan entre delimitadores `<<RAG …>>` declarados como canal NO CONFIABLE en el prompt de sistema (regla 8) y los patrones de instrucción embedida (8 familias, español e inglés) se marcan en línea como dato sin borrar evidencia. La línea "ESCUDO LLM01" del contexto declara cuántas marcas aplicó.

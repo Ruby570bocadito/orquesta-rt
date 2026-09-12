@@ -17,6 +17,7 @@ implementado.
 |---|---|---|---|
 | 01 | [sesion-01-primeras-rondas.md](sesion-01-primeras-rondas.md) | pre-v24 y v24 | Revisión inicial, sesiones revocables (no publicada, superada por z3-F4) y escudo LLM01 (no publicada, recuperada en v25). Ronda v24: MISP de laboratorio + validación Sigma en vivo. |
 | 02 | [sesion-02-v25-escudo-llm01-ui-sigma.md](sesion-02-v25-escudo-llm01-ui-sigma.md) | v25 | Re-implementación del escudo anti-inyección indirecta OWASP LLM01:2025 en el copiloto + UI de validación Sigma en la consola + entorno del lab para MISP. |
+| 03 | [sesion-03-v26-eco-json-higiene-cuenta.md](sesion-03-v26-eco-json-higiene-cuenta.md) | v26 | Cierre del eco de JSON en la SALIDA del copiloto (procedencia del bloque de sugerencias + canales del contrato) + panel de higiene de cuenta en la consola (estado vivo + cerrar-todas). |
 
 ## Convenciones
 
