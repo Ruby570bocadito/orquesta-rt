@@ -248,7 +248,8 @@ def test_paquete_sigma_solo_tecnicas_conocidas(tmp_path) -> None:
     assert "Kerberoasting" in informe
     assert "Detectado" in informe  # resultado registrado por el operador
     assert "T9999.001" in informe  # documentada, no silenciada
-    assert resumen == {"hallazgos": 2, "reglas": 1, "sin_fuente": 1}
+    assert resumen == {"hallazgos": 2, "reglas": 1, "sin_fuente": 1,
+                       "sigma_validas": 1, "sigma_invalidas": 0}
 
 
 def test_paquete_purple_409_sin_hallazgos(tmp_path) -> None:

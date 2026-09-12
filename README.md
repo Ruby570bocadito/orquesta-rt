@@ -81,11 +81,11 @@ común, y la detección del defensor es un resultado de primera clase
 | Phishing | ✅ Real en lab | Campañas con plantilla y destinatarios aprobados, métricas, sigilo frente al blue team |
 | Cadenas threat-led | ✅ Real | 4 cadenas estilo Atomic Red Team contrastadas contra la evidencia del caso (ruido prometido = ruido exigido) |
 | Rutas de ataque | ✅ Real | Motor Neo4j con esquema BloodHound; rutas críticas resueltas por el servidor (allShortestPaths) |
-| Threat intel | ✅ Real | MISP (protocolo oficial) + NVD público; sin instancia configurada exige el requisito exacto |
+| Threat intel | ✅ Real | MISP (protocolo oficial) + NVD público; servidor MISP de laboratorio incluido para ejercitarlo end-to-end |
 | SSO federado | ✅ Real | OIDC authorization-code + PKCE S256, verificación RS256 del id_token vía JWKS, alta JIT |
 | Multi-tenant RBAC | ✅ Real | Roles admin/gestor/operador/lector firmados en el JWT; aislamiento de casos por organización en la API |
 | Webhooks | ✅ Real | Entrega firmada HMAC-SHA256, reintentos acotados, anti-SSRF, historial de entregas |
-| Purple teaming | ✅ Real | Registro de detección/preención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida |
+| Purple teaming | ✅ Real | Registro de detección/preención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida y VALIDADOS antes de la entrega |
 | Cobertura ATT&CK | ✅ Real | Matriz técnica × campaña entre casos, CSV exportable, capa Navigator |
 | Copiloto IA | ✅ Real | GLM vía puente OpenAI-compatible; RAG BM25 sobre la memoria del caso; nunca ejecuta acciones |
 | Informe + cierre | ✅ Real | Markdown español con ATT&CK, DOCX/PDF, certificado de borrado documentado |
@@ -247,12 +247,14 @@ informe en español ✔ · SSO + multi-tenant + despliegue Docker/K8s ✔.
 
 Siguiente:
 
-- **Modo continuo CTEM**: programar cadenas y calcular el delta de cobertura,
-  detecciones y superficie entre corridas (bucle de exposición continua).
-- **Ingestión Azure/híbrida** en el motor de rutas (AzureHound).
-- **Validación Sigma en vivo** contra los logs reales del laboratorio
-  (cierre completo del bucle purple).
-- **Instancia MISP de laboratorio** lista en `docker-compose.lab.yml`.
+- **UI de validación Sigma en la consola** (el endpoint `POST /sigma/validar` y el veredicto en el ZIP ya existen; falta el panel).
+- **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
+- **Cierre del bucle purple**: delta CTEM refleje cambios de detección al desplegar reglas Sigma validadas.
+
+Completado en v24:
+
+- **Validación Sigma en vivo**: `sigma_valid.py` comprueba estructuralmente cada regla (YAML, UUID, logsource, selecciones de la condición) antes de entregarla; veredicto por regla en `POST /api/engagements/{id}/sigma/validar` y dentro del paquete purple (`sigma/validacion.md`).
+- **Threat intel de laboratorio**: `platform/lab/servidor_misp_lab.py` implementa el subconjunto real del protocolo MISP (getVersion, restSearch de atributos/eventos, events/add) con intel semilla ACME; `docker compose -f platform/lab/docker-compose.lab.yml up -d lab-misp` y el conector oficial ejercita el enriquecimiento completo con `MISP_URL=http://localhost:8444`.
 
 ## Documentación
 

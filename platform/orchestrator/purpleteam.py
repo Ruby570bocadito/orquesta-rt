@@ -93,6 +93,33 @@ def _slug(texto: str, maximo: int = 42) -> str:
     return (slug[:maximo].rstrip("-")) or "hallazgo"
 
 
+def reglas_sigma_caso(engagement_id: str,
+                      memoria: MemoriaCaso) -> tuple[list[dict], list[str]]:
+    """Reglas Sigma del caso + técnicas sin fuente de logs conocida.
+
+    Generador compartido por el paquete purple y el endpoint de
+    validación Sigma (v24): misma reglas, misma política anti-invención.
+
+    Devuelve (reglas, sin_fuente) donde cada regla es
+    {"id": hallazgo, "titulo": …, "tecnica": …, "yml": …}.
+    """
+    if memoria.obtener_engagement(engagement_id) is None:
+        raise KeyError(f"Engagement {engagement_id} no existe")
+    hallazgos = [dict(h) for h in memoria.listar_hallazgos(engagement_id)]
+    reglas: list[dict] = []
+    sin_fuente: list[str] = []
+    for h in hallazgos:
+        tecnica = str(h.get("tecnica_mitre") or "").strip().upper()
+        yml = _regla_sigma(h, engagement_id)
+        if yml is None:
+            if tecnica:
+                sin_fuente.append(tecnica)
+            continue
+        reglas.append({"id": h["id"], "titulo": h["titulo"],
+                       "tecnica": tecnica, "yml": yml})
+    return reglas, sin_fuente
+
+
 def _regla_sigma(hallazgo: dict, engagement_id: str) -> str | None:
     """Esqueleto Sigma del hallazgo, o None si la plataforma no conoce la
     fuente de logs de la técnica (política anti-invención)."""
@@ -170,17 +197,17 @@ def construir_paquete_purple(engagement_id: str,
         if d.get("hallazgo_id"):
             por_hallazgo.setdefault(d["hallazgo_id"], []).append(d)
 
-    reglas: dict[str, str] = {}
-    sin_fuente: list[str] = []
-    for h in hallazgos:
-        yml = _regla_sigma(h, engagement_id)
-        if yml is None:
-            tecnica = str(h.get("tecnica_mitre") or "").strip().upper()
-            if tecnica:
-                sin_fuente.append(tecnica)
-            continue
-        reglas[h["id"]] = yml
+    # Reglas compartidas con el validador (v24): mismas que emite el
+    # endpoint de validación, mismas que van al ZIP.
+    generadas, sin_fuente = reglas_sigma_caso(engagement_id, memoria)
+    reglas: dict[str, str] = {r["id"]: r["yml"] for r in generadas}
 
+    # Validación estructural de las reglas ANTES de entregarlas (v24):
+    # el informe declara el veredicto real por regla, no "esperamos que".
+    from .sigma_valid import validar_lote
+    nombres = {f"{r['tecnica']}-{_slug(r['titulo'])}.yml": r
+               for r in generadas}
+    validacion = validar_lote({n: r["yml"] for n, r in nombres.items()})
     generados = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lineas = [
         f"# Informe purple team — {fila['nombre']}",
@@ -211,6 +238,11 @@ def construir_paquete_purple(engagement_id: str,
                       "(directorio `sigma/`, `status: experimental`). Ajusta la "
                       "selección a tu entorno y desplázalas vía tu pipeline de "
                       "detection-as-code.")
+        lineas.append("")
+        lineas.append(f"Validación Sigma (v24): {validacion['validas']} de "
+                      f"{validacion['total']} reglas pasan la comprobación "
+                      f"estructural antes de la entrega "
+                      f"(`sigma/validacion.md` con el veredicto por regla).")
     else:
         lineas.append("Ninguna técnica del caso tiene fuente de logs conocida "
                       "por la plataforma: no se emiten reglas (política "
@@ -245,6 +277,31 @@ def construir_paquete_purple(engagement_id: str,
             h = next(x for x in hallazgos if x["id"] == h_id)
             nombre = f"{(h.get('tecnica_mitre') or 'tecnica').upper()}-{_slug(h['titulo'])}.yml"
             zf.writestr(f"sigma/{nombre}", yml)
+        # Veredicto de validación Sigma (v24): evidencia auditable de que
+        # las reglas entregadas pasan la comprobación estructural.
+        if generadas:
+            lineas_val = ["# Validación de las reglas Sigma del caso", "",
+                          f"Reglas validadas: {validacion['total']} · "
+                          f"válidas: {validacion['validas']} · "
+                          f"inválidas: {validacion['invalidas']}  ",
+                          f"Motor profundo: "
+                          f"{validacion['reglas'][0]['motor_profundo']}  ",
+                          "",
+                          "| Regla | Veredicto | Detalle |",
+                          "|---|---|---|"]
+            for r in validacion["reglas"]:
+                regla = nombres.get(r["nombre"])
+                origen = (f"hallazgo {regla['id']} ({regla['tecnica']})"
+                          if regla else r["nombre"])
+                detalle = ("; ".join(r["errores"]) if r["errores"]
+                           else "; ".join(r["avisos"]) or "sin incidencias")
+                lineas_val.append(
+                    f"| {r['nombre']} | "
+                    f"{'VÁLIDA' if r['valida'] else 'INVÁLIDA'} "
+                    f"| {origen}: {detalle} |")
+            zf.writestr("sigma/validacion.md", "\n".join(lineas_val) + "\n")
     resumen = {"hallazgos": len(hallazgos), "reglas": len(reglas),
-               "sin_fuente": len(set(sin_fuente))}
+               "sin_fuente": len(set(sin_fuente)),
+               "sigma_validas": validacion["validas"],
+               "sigma_invalidas": validacion["invalidas"]}
     return buffer.getvalue(), resumen

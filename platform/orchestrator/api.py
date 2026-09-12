@@ -2629,6 +2629,46 @@ def paquete_purple_team(engagement_id: str, request: Request) -> Response:
                  f'attachment; filename="purple_{engagement_id}.zip"'})
 
 
+# ---------------------------------------------------------------------------
+# Validación Sigma en vivo (v24): las reglas del caso se comprueban
+# estructuralmente ANTES de que el operador las despliegue en su SIEM.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/engagements/{engagement_id}/sigma/validar")
+def validar_sigma_caso(engagement_id: str, request: Request) -> dict[str, Any]:
+    """Valida las esqueletos Sigma del caso (generador real del paquete
+    purple) y devuelve el veredicto por regla: YAML parseable, id UUID,
+    logsource, selección referenciada por la condición, tags ATT&CK.
+    Validación profunda adicional si pySigma está instalado."""
+    from .purpleteam import reglas_sigma_caso  # mismo generador que el ZIP
+    from .sigma_valid import validar_lote
+    identidad = operador_de(request)
+    with _memoria_de(engagement_id) as memoria:
+        try:
+            generadas, sin_fuente = reglas_sigma_caso(engagement_id, memoria)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc))
+        lote = validar_lote({f"{r['tecnica']}-{r['id']}.yml": r["yml"]
+                             for r in generadas})
+        memoria.registrar_auditoria(
+            engagement_id, Actor.HUMANO, "caso.sigma_validar",
+            detalle=(f"validación Sigma: {lote['validas']}/{lote['total']} "
+                     f"reglas válidas "
+                     f"({lote['invalidas']} inválidas, "
+                     f"{len(sin_fuente)} técnicas sin fuente mapeada) "
+                     f"— por {identidad}"),
+            herramienta="sigma_valid", resultado="ok")
+    return {"total": lote["total"], "validas": lote["validas"],
+            "invalidas": lote["invalidas"],
+            "sin_fuente": sorted(set(sin_fuente)),
+            "motor": (lote["reglas"][0]["motor_profundo"]
+                      if lote["reglas"] else "sin reglas que validar"),
+            "reglas": [{"nombre": r["nombre"], "valida": r["valida"],
+                        "errores": r["errores"], "avisos": r["avisos"]}
+                       for r in lote["reglas"]]}
+
+
 @app.get("/api/admin/respaldo-completo")
 def respaldo_completo(request: Request) -> Response:
     """Copia de seguridad consistente de TODAS las BDs del sistema
