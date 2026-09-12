@@ -425,8 +425,31 @@ class MemoriaCaso:
         1. Hash: SHA-256(contenido) == hash_sha256 almacenado (no manipulado)
         2. Firma: HMAC(hash, clave_caso) == firma_hmac (no falsificada)
         3. Encadenamiento: hash_previo == hash de la evidencia anterior
+
+        Tolerancia con despliegues legados (Z2-ronda-2): hasta la v24 la
+        cadena se RECORRÍA por `creado_en`; desde entonces se recorre por
+        rowid (orden real de inserción). Una BD o respaldo ANTERIOR puede
+        ser íntegro bajo su orden original y aun así "romper" bajo el
+        nuevo: si la verificación por rowid falla, se re-verifica COMPLETA
+        en el orden legado antes de alarmar y el resultado declara
+        `modo: "legado_creado_en"`. No debilita la integridad: se validan
+        los MISMOS hashes, firmas y eslabones sobre un orden determinista
+        de los mismos datos — una manipulación real falla en ambos órdenes.
         """
         filas = self.listar_evidencias(engagement_id)
+        resultado = self._verificar_cadena_orden(filas)
+        if resultado["valida"]:
+            return resultado
+        # Python's sort es estable: los empates de creado_en conservan el
+        # orden de fila (rowid), igual que hacía ORDER BY creado_en antiguo.
+        legado = self._verificar_cadena_orden(
+            sorted(filas, key=lambda f: f["creado_en"] or ""))
+        if legado["valida"]:
+            return dict(legado, modo="legado_creado_en")
+        return resultado
+
+    def _verificar_cadena_orden(self, filas: list[sqlite3.Row]) -> dict[str, Any]:
+        """Verificación integral de la cadena sobre un orden dado."""
         previo = "genesis"
         for fila in filas:
             if hashlib.sha256((fila["contenido"] or "").encode()).hexdigest() != fila["hash_sha256"]:

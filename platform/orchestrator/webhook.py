@@ -60,8 +60,6 @@ EVENTOS: tuple[str, ...] = (
 
 # Redes de metadatos de nube vetadas como receptor (SSRF): el webhook es
 # una configuración de admin, pero el límite link-local es defense-in-depth.
-# Redes de metadatos de nube vetadas como receptor (SSRF): el webhook es
-# una configuración de admin, pero el límite link-local es defense-in-depth.
 # z3 (auditoría): vetado por IP LITERAL (ipaddress), no por prefijo de texto
 # — "169.254." no atrapaba 0xA9.0xFE..., ni los metadatos de Alibaba
 # (100.100.100.200) u Oracle (192.0.0.192). El loopback se PERMITE (receptor
@@ -330,11 +328,13 @@ def _post(url: str, cuerpo: bytes, cabeceras_extra: dict[str, str]) -> dict[str,
         import httpx
         cabeceras = {"Content-Type": "application/json",
                      "User-Agent": "OrquestaRT-Webhook/1", **cabeceras_extra}
-        # z3 (auditoría seguridad): follow_redirects DESACTIVADO. Con redirec-
-        # tos activos, un receptor malicioso hacía 302 hacia
+        # z3 (auditoría) + z2 (ronda 2): follow_redirects DESACTIVADO. Con
+        # redirecciones activas, un receptor comprometido hacía 302 hacia
         # http://169.254.169.254/... y saltaba la vetación de validar_url
-        # (el cliente HTTP resolvía la redirección sin revalidar). Un 3xx se
-        # reporta como fallo de entrega con diagnóstico claro.
+        # (el cliente HTTP resolvía la redirección sin revalidar) — el POST
+        # FIRMADO viajaba al destino tras el salto. Un 3xx se reporta como
+        # fallo de entrega con diagnóstico claro y SIN reintento. Si tu
+        # receptor redirige http→https, da de alta la URL https directa.
         with httpx.Client(timeout=5.0, follow_redirects=False) as cliente:
             r = cliente.post(url, content=cuerpo, headers=cabeceras)
         if 300 <= r.status_code < 400:
@@ -349,10 +349,23 @@ def _post(url: str, cuerpo: bytes, cabeceras_extra: dict[str, str]) -> dict[str,
 def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
               engagement_id: str, carga: dict[str, Any]) -> dict[str, Any]:
     """Entrega con UN reintento (t+2 s) ante 5xx o error de red. Cada intento
-    usa un cuerpo NUEVO (ts distinto) y por tanto firma nueva."""
+    usa un cuerpo NUEVO (ts distinto) y por tanto firma nueva.
+
+    Antes de conectar se re-verifica el veto SSRF (capa de despacho): el
+    alta pudo ser hace días y el DNS puede haber cambiado (rebinding), y
+    el canal heredado WEBHOOK_URL nunca pasó por validar_url. Un receptor
+    vetado no consume ni un intento y queda registrado en el historial.
+    """
     entrega = uuid.uuid4().hex
     intentos = 0
     resultado: dict[str, Any] = {"ok": False, "http": None, "error": None}
+    try:
+        _veto_por_resolucion(urlparse(url).hostname or "")
+    except ValueError as exc:
+        error = str(exc)[:200]
+        _registrar_entrega(webhook_id, evento, engagement_id,
+                           False, None, error, 0)
+        return {"ok": False, "http": None, "error": error}
     for intento in (1, 2):
         intentos = intento
         cuerpo = _cuerpo(evento, engagement_id, entrega, carga)

@@ -533,3 +533,137 @@ def os_environ_get_default_one(monkeypatch, modulo, clave: str) -> bool:
     monkeypatch.delenv(clave, raising=False)
     # Reproduce exactamente la expresión de los módulos:
     return __import__("os").environ.get(clave, "1") != "0"
+
+
+# ---------------------------------------------------------------------------
+# 11) Ronda Z2-2: SSRF en el despacho, sin redirecciones, cadena legada
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDespachoZ2:
+    def test_rebinding_detectado_en_despacho(self, webhook_db, monkeypatch) -> None:
+        """TOCTOU de DNS: el ALTA fue legítima, pero al DESPACHAR el host
+        resuelve a link-local (rebinding). El veto ahora se re-aplica justo
+        antes de conectar: sin ni un intento de red y con la entrega
+        registrada como bloqueada (defensa en profundidad, no alarma)."""
+        alta = webhook.crear_webhook("https://receptor.lab/hook",
+                                     ["hallazgo.registrado"], secreto="s" * 20)
+
+        def _post_prohibido(url, cuerpo, cabeceras):
+            raise AssertionError("no debe conectarse a un receptor vetado")
+
+        def _getaddrinfo_rebinding(host, puerto):
+            # Entre el alta y la entrega, el DNS del receptor "cambió":
+            return [(2, 1, 6, "", ("169.254.169.254", 0))]
+
+        monkeypatch.setattr(webhook, "_post", _post_prohibido)
+        monkeypatch.setattr(webhook.socket, "getaddrinfo", _getaddrinfo_rebinding)
+        entregas = webhook.despachar("hallazgo.registrado", "caso_z2test02", {})
+        assert entregas == 0
+        historial = webhook.entregas_de(alta["id"])
+        assert not historial[0]["ok"]
+        assert historial[0]["http"] is None
+        assert "link-local" in (historial[0]["error"] or "")
+        assert historial[0]["intentos"] == 0, "un veto no consume intentos"
+
+    def test_canal_heredado_entorno_tambien_verificado(self, webhook_db, monkeypatch) -> None:
+        """El canal heredado WEBHOOK_URL nunca pasó por validar_url: la capa
+        de despacho lo cubre ahora igual que los receptores de BD."""
+        monkeypatch.setenv("WEBHOOK_URL",
+                           "http://2852039166/latest/meta-data/")  # decimal de 169.254.169.254
+
+        def _post_prohibido(url, cuerpo, cabeceras):
+            raise AssertionError("el canal heredado vetado no debe conectar")
+
+        monkeypatch.setattr(webhook, "_post", _post_prohibido)
+        assert webhook.despachar("hallazgo.registrado", "caso_z2test03", {}) == 0
+
+    def test_redirecciones_no_se_siguen(self, webhook_db) -> None:
+        """Un receptor que responde 302 hacia metadatos NO arrastra el POST
+        firmado: follow_redirects=False → la 3xx es no-OK y respuesta FIRME
+        (sin reintento, sin segundo salto)."""
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class _Redir(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(302)
+                self.send_header("Location",
+                                 "http://169.254.169.254/latest/meta-data/")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        servidor = HTTPServer(("127.0.0.1", 0), _Redir)
+        threading.Thread(target=servidor.serve_forever, daemon=True).start()
+        try:
+            alta = webhook.crear_webhook(
+                f"http://127.0.0.1:{servidor.server_port}/hook",
+                ["hallazgo.registrado"], secreto="s" * 20)
+            r = webhook.probar_webhook(alta["id"])
+            assert r["http"] == 302 and not r["enviado"]
+            historial = webhook.entregas_de(alta["id"], limite=1)
+            assert historial[0]["intentos"] == 1, \
+                "3xx es respuesta firme: sin reintento"
+        finally:
+            servidor.shutdown()
+            servidor.server_close()
+
+
+class TestCadenaLegadaZ2:
+    def test_cadena_escrita_en_orden_legado_verifica_y_declara_modo(self, tmp_path) -> None:
+        """BD anterior a v24: la cadena se escribió recorriendo creado_en.
+        Con orden de inserción (rowid) distinto, el verificador nuevo daba
+        'ruptura de encadenamiento' FALSA sobre datos íntegros. Ahora
+        re-verifica en el orden legado y declara modo='legado_creado_en'."""
+        from datetime import timedelta, timezone
+
+        memoria, eid = _caso(tmp_path, "caso_z2leg01")
+        base = datetime.now(timezone.utc)
+        # A se inserta PRIMERO pero su reloj dice DESPUÉS (lo que el orden
+        # legado por creado_en reordenaba); B queda segunda por rowid.
+        ev_a = Evidencia(id="ev_leg_a", engagement_id=eid,
+                         tipo=TipoEvidencia.JSON, titulo="A", contenido="cuerpo a",
+                         fase=Fase.F2_RECON, creado_en=base + timedelta(seconds=30))
+        ev_b = Evidencia(id="ev_leg_b", engagement_id=eid,
+                         tipo=TipoEvidencia.JSON, titulo="B", contenido="cuerpo b",
+                         fase=Fase.F2_RECON, creado_en=base)
+        memoria.guardar_evidencia(ev_a)
+        memoria.guardar_evidencia(ev_b)
+        # Reescribimos el encadenamiento COMO LO GENERABA el código legado
+        # (orden creado_en: B → genesis, A → hash(B)). La firma no cambia:
+        # firma el hash del CONTENIDO, no el eslabón — es fiel a una BD vieja.
+        memoria._conn.execute("UPDATE evidencias SET hash_previo='genesis' "
+                              "WHERE id='ev_leg_b'")
+        memoria._conn.execute("UPDATE evidencias SET hash_previo=? "
+                              "WHERE id='ev_leg_a'", (ev_b.hash_sha256,))
+        memoria._conn.commit()
+
+        r = memoria.verificar_cadena(eid)
+        assert r["valida"] is True, \
+            "una cadena legada íntegra no debe alarmar (falso positivo)"
+        assert r.get("modo") == "legado_creado_en", \
+            "el resultado debe declarar que verificó bajo el orden legado"
+
+        # Y una manipulación REAL sigue detectándose (ambos órdenes fallan):
+        memoria._conn.execute("UPDATE evidencias SET contenido='manipulado' "
+                              "WHERE id='ev_leg_a'")
+        memoria._conn.commit()
+        r2 = memoria.verificar_cadena(eid)
+        assert r2["valida"] is False
+        assert "contenido manipulado" in (r2["primer_error"] or "")
+
+    def test_cadena_actual_verifica_sin_modo(self, tmp_path) -> None:
+        """La BD creada con el mecanismo actual (rowid) verifica en primer
+        lugar y NO declara modo legado (el caso común no paga re-verificación)."""
+        memoria, eid = _caso(tmp_path, "caso_z2leg02")
+        memoria.guardar_evidencia(Evidencia(
+            id="ev_act_a", engagement_id=eid, tipo=TipoEvidencia.JSON,
+            titulo="A", contenido="uno", fase=Fase.F2_RECON))
+        memoria.guardar_evidencia(Evidencia(
+            id="ev_act_b", engagement_id=eid, tipo=TipoEvidencia.JSON,
+            titulo="B", contenido="dos", fase=Fase.F2_RECON))
+        r = memoria.verificar_cadena(eid)
+        assert r["valida"] is True
+        assert "modo" not in r

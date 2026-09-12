@@ -284,6 +284,17 @@ export function VistaPanel() {
                 <p className="mt-1.5 font-mono text-[10px] text-zinc-600">
                   suma del ruido estimado de cada acción que firmaste
                 </p>
+                {/* Z2-ronda-2: el boundary corta DURO en techo × 5 (margen x5
+                    documentado en guardrails._MARGEN_TECHO_RUIDO). El operador
+                    ve el presupuesto completo, no solo el nivel pactado. */}
+                <p className="mt-0.5 font-mono text-[10px] text-zinc-600">
+                  corte duro en{" "}
+                  <span className="text-zinc-400">{roe.techo_ruido * 5}</span> ·
+                  margen restante{" "}
+                  <span className={cn(ruidoAcumulado >= roe.techo_ruido * 5 ? "text-red-300" : "text-zinc-400")}>
+                    {Math.max(0, roe.techo_ruido * 5 - ruidoAcumulado)}
+                  </span>
+                </p>
               </div>
 
               <div className={cn("rounded-lg border p-3", cadena.valida ? "border-emerald-500/30 bg-emerald-500/5" : "border-crimson/40 bg-crimson/5")}>
