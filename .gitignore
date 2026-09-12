@@ -87,3 +87,11 @@ lab/logs/
 lab/downloads/
 lab/env_laboratorio.sh
 /skills/
+
+# --- z3 (auditoría seguridad): bases de datos locales NUNCA en el repo ---
+# usuarios.db contiene el secreto de firma JWT y hashes de credenciales;
+# casos/*.db contienen datos de engagements de clientes.
+usuarios.db
+/casos/
+/db/
+*.db

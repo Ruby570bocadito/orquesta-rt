@@ -112,7 +112,12 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CONSOLE_ORIGINS", "*").split(","),
+    # z3 (auditoría seguridad): el default era "*" (cualquier origen web podía
+    # leer respuestas si obtenía un token). La consola consume la API vía SU
+    # proxy /api/orchestrator/* (mismo origen), así que el navegador nunca
+    # necesita CORS cruzado; el default ahora es el origen de la consola.
+    allow_origins=os.environ.get("CONSOLE_ORIGINS",
+                                 "http://localhost:3000").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -187,8 +192,15 @@ _limitador_auth = _LimitadorTasa(maximo=10, ventana_s=60.0)
 
 
 def _clave_cliente(request: Request) -> str:
+    # z3 (auditoría seguridad): se usa el ÚLTIMO salto de X-Forwarded-For, no
+    # el primero. El primero lo CONTROLA el cliente cuando accede directo a
+    # la API (p. ej. puerto 8000 publicado), así que un atacante podía rotar
+    # una IP falsa por petición y saltarse el limitador de tasa por completo.
+    # El último salto es el añadido por el proxy de confianza más próximo
+    # (proxy Next.js / Caddy), igual que hace el proxy al reenviar.
     fwd = request.headers.get("x-forwarded-for", "")
-    return (fwd.split(",")[0].strip() if fwd
+    saltos = [s.strip() for s in fwd.split(",") if s.strip()] if fwd else []
+    return (saltos[-1] if saltos
             else (request.client.host if request.client else "desconocido"))
 
 
@@ -278,6 +290,14 @@ async def _auth_middleware(request: Request, call_next):
     if not claims:
         return _respuesta_error(
             401, "Sesión inválida o expirada: vuelve a iniciar sesión.")
+    # z3 (auditoría seguridad): REVOCACIÓN de sesiones. La firma y la
+    # expiración no bastan: una cuenta eliminada, degradada o movida de
+    # organización, o con la credencial restablecida, debe perder sus
+    # sesiones emitidas antes del cambio (antes vivían hasta 12 h).
+    if not auth.sesion_viva(claims):
+        return _respuesta_error(
+            401, "La sesión ya no es válida para esta cuenta: vuelve a "
+                 "iniciar sesión.")
     request.state.operador = claims
     # --- RBAC v21: escritura exige nivel operador -------------------------
     if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -728,12 +748,27 @@ def aprobaciones(engagement_id: str, solo_pendientes: bool = False) -> list[dict
 @app.post("/api/aprobaciones/{aprobacion_id}/decision")
 def decidir(aprobacion_id: str, p: PeticionDecision, request: Request) -> dict[str, Any]:
     """Decisión de firma ROE. La identidad queda fijada por la sesión JWT:
-    la auditoría refleja QUIÉN decidió de verdad, sin suplantaciones."""
+    la auditoría refleja QUIÉN decidió de verdad, sin suplantaciones.
+
+    z3 (auditoría seguridad): aislamiento multi-tenant APLICADO AQUÍ. La ruta
+    /api/aprobaciones/{id}/decision no casa con _RE_ENGAGEMENT (el chequeo de
+    tenant del middleware no la cubre), así que un operador de la organización
+    A podía firmar/rechazar aprobaciones de un caso de la organización B
+    iterando ids (BOLA horizontal). Ahora solo se consideran casos de la
+    propia organización (admin: todos)."""
     identidad = operador_de(request)
-    # La aprobación puede vivir en la BD de cualquier caso: buscarla.
+    admin = es_admin(request)
+    tenant = tenant_de(request)
+    # La aprobación puede vivir en la BD de cualquier caso: buscarla SOLO
+    # entre los casos a los que el peticionario tiene acceso.
     if RAIZ_CASOS.exists():
         for db in sorted(RAIZ_CASOS.glob("*.db")):
             memoria = MemoriaCaso(db)
+            if not admin:
+                fila_caso = memoria.obtener_engagement(db.stem)
+                if not fila_caso or str(fila_caso["tenant_id"]) != tenant:
+                    memoria.cerrar()
+                    continue
             pendientes = memoria.listar_aprobaciones(db.stem, solo_pendientes=True)
             if any(a["id"] == aprobacion_id for a in pendientes):
                 from .models import Actor
@@ -1153,6 +1188,17 @@ def hallazgos_csv(engagement_id: str) -> Response:
     """Exportación CSV real de hallazgos (gestión de remediación, ticketing)."""
     import csv
     import io
+
+    def _celda_segura(valor: Any) -> Any:
+        """z3 (auditoría seguridad): neutraliza inyección de fórmulas de hoja
+        de cálculo (CSV injection, OWASP). Un título/descripción que empiece
+        por = + - @ o tab/CR se ejecutaría como fórmula al abrir el CSV en
+        Excel/LibreOffice (p. ej. =COMANDO(...)). Se antepone un apóstrofe
+        que las hojas de cálculo tratan como texto literal."""
+        if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + valor
+        return valor
+
     with _memoria_de(engagement_id) as memoria:
         filas = memoria.listar_hallazgos(engagement_id)
         if not filas:
@@ -1164,7 +1210,7 @@ def hallazgos_csv(engagement_id: str) -> Response:
         escritor = csv.DictWriter(buffer, fieldnames=columnas, extrasaction="ignore")
         escritor.writeheader()
         for fila in filas:
-            escritor.writerow(dict(fila))
+            escritor.writerow({k: _celda_segura(v) for k, v in dict(fila).items()})
         memoria.registrar_auditoria(
             engagement_id, Actor.SISTEMA, "hallazgos.export_csv",
             detalle=f"{len(filas)} hallazgos exportados a CSV",

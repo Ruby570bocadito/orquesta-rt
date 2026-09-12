@@ -131,6 +131,12 @@ def _migrar(conn: sqlite3.Connection) -> None:
             "DEFAULT 'predeterminada'")
     if "sso_sub" not in columnas:
         conn.execute("ALTER TABLE operadores ADD COLUMN sso_sub TEXT")
+    # z3 (auditoría seguridad): instante (epoch) a partir del cual los tokens
+    # emitidos ANTES ya no valen para esta cuenta (revocación de sesiones).
+    if "invalidar_antes" not in columnas:
+        conn.execute(
+            "ALTER TABLE operadores ADD COLUMN invalidar_antes REAL NOT NULL "
+            "DEFAULT 0")
     if not conn.execute(
             "SELECT 1 FROM organizaciones WHERE id=?",
             (TENANT_PREDETERMINADA,)).fetchone():
@@ -244,6 +250,76 @@ def verificar_token(token: str) -> Optional[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# z3 (auditoría seguridad): REVOCACIÓN de sesiones. Un JWT no puede
+# invalidarse por sí solo: sin este chequeo, una cuenta ELIMINADA, DEGRADADA
+# o con credencial restablecida seguía operativa hasta 12 h (TOKEN_HORAS)
+# con su token robado/copiado. `invalidar_antes` (epoch por cuenta) se fija
+# en cada cambio administrativo; el middleware comprueba que el token fue
+# emitido DESPUÉS y que rol/tenant del claim siguen vigentes en la BD.
+# El coste (1 SELECT por petición) se amortiza con una caché TTL corta.
+# ---------------------------------------------------------------------------
+
+_CACHE_SESION_TTL_S = 15.0
+_sesiones_cache: dict[tuple[str, str], tuple[float, Optional[dict[str, Any]]]] = {}
+_SESIONES_CACHE_MAX = 5_000
+
+
+def _invalidar_cache_sesion(usuario: str) -> None:
+    for k in [k for k in _sesiones_cache if k[1] == usuario]:
+        del _sesiones_cache[k]
+
+
+def estado_actual(usuario: str) -> Optional[dict[str, Any]]:
+    """Estado vivo de la cuenta: (existe, rol, tenant_id, invalidar_antes).
+    None si la cuenta ya no existe. Con caché TTL de 15 s (clave incluye la
+    BD activa: despliegues y tests aíslan por RUTA_DB)."""
+    clave = (str(RUTA_DB), usuario)
+    ahora = time.time()
+    if len(_sesiones_cache) > _SESIONES_CACHE_MAX:
+        for k in [k for k, v in _sesiones_cache.items()
+                  if ahora - v[0] > _CACHE_SESION_TTL_S]:
+            del _sesiones_cache[k]
+    hit = _sesiones_cache.get(clave)
+    if hit and ahora - hit[0] < _CACHE_SESION_TTL_S:
+        return hit[1]
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT rol, tenant_id, invalidar_antes FROM operadores "
+            "WHERE usuario=?", (usuario,)).fetchone()
+        estado = (dict(fila) if fila else None)
+    finally:
+        conn.close()
+    _sesiones_cache[clave] = (ahora, estado)
+    return estado
+
+
+def sesion_viva(claims: dict[str, Any]) -> bool:
+    """¿El token sigue siendo VÁLIDO para la cuenta actual?
+    Comprueba existencia, rol y tenant vigentes y el corte `invalidar_antes`
+    contra el `iat` del token. Los tokens sin `iat` legible se rechazan."""
+    usuario = str(claims.get("sub") or "")
+    if not usuario:
+        return False
+    try:
+        iat = int(claims.get("iat") or 0)
+    except (TypeError, ValueError):
+        return False
+    if iat <= 0:
+        return False
+    estado = estado_actual(usuario)
+    if estado is None:
+        return False  # cuenta eliminada: token muerto
+    if estado["rol"] != claims.get("rol"):
+        return False  # rol cambiado (degradación o promoción): re-login
+    if estado["tenant_id"] != claims.get("ten"):
+        return False  # cuenta movida de organización: re-login
+    if iat < float(estado["invalidar_antes"] or 0):
+        return False  # credencial/rol alterado tras la emisión
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Cuentas de operador
 # ---------------------------------------------------------------------------
 
@@ -331,9 +407,13 @@ def cambiar_contrasena(usuario: str, actual: str, nueva: str) -> bool:
     _validar_contrasena(nueva)
     conn = _conexion()
     try:
-        conn.execute("UPDATE operadores SET hash=? WHERE usuario=?",
-                     (_hash_contrasena(nueva), usuario))
+        # z3 (revocación de sesiones): el cambio de credencial mata los tokens
+        # emitidos antes de ahora (robo de sesión / cambio tras compromiso).
+        conn.execute(
+            "UPDATE operadores SET hash=?, invalidar_antes=? WHERE usuario=?",
+            (_hash_contrasena(nueva), time.time(), usuario))
         conn.commit()
+        _invalidar_cache_sesion(usuario)
         return True
     finally:
         conn.close()
@@ -402,6 +482,9 @@ def eliminar_operador(usuario: str, peticionario: str) -> None:
         conn.commit()
     finally:
         conn.close()
+    # z3 (revocación de sesiones): el token de la cuenta eliminada muere en
+    # la próxima petición (estado_actual → None) sin esperar a la caché.
+    _invalidar_cache_sesion(usuario)
 
 
 def contar_admins() -> int:
@@ -422,14 +505,18 @@ def restablecer_contrasena(usuario: str, nueva: str) -> dict[str, Any]:
     _validar_contrasena(nueva)
     conn = _conexion()
     try:
+        # z3 (revocación de sesiones): el restablecimiento administrativo
+        # responde a un INCIDENTE: mata también las sesiones vivas de la
+        # cuenta afectada, no solo la contraseña.
         cur = conn.execute(
-            "UPDATE operadores SET hash=? WHERE usuario=?",
-            (_hash_contrasena(nueva), usuario))
+            "UPDATE operadores SET hash=?, invalidar_antes=? WHERE usuario=?",
+            (_hash_contrasena(nueva), time.time(), usuario))
         conn.commit()
         if cur.rowcount == 0:
             raise ValueError(f"El usuario '{usuario}' no existe")
     finally:
         conn.close()
+    _invalidar_cache_sesion(usuario)
     _intentos.pop(usuario, None)  # desbloquea la cuenta tras el reset
     return {"usuario": usuario, "restablecida": True}
 
@@ -449,10 +536,14 @@ def cambiar_rol(usuario: str, rol: str, peticionario: str) -> dict[str, Any]:
             raise ValueError(f"El usuario '{usuario}' no existe")
         if fila["rol"] == "admin" and rol != "admin" and contar_admins() <= 1:
             raise ValueError("No se puede degradar al último admin del despliegue")
-        conn.execute("UPDATE operadores SET rol=? WHERE usuario=?", (rol, usuario))
+        # z3 (revocación de sesiones): el rol vigente debe ser el del token.
+        conn.execute(
+            "UPDATE operadores SET rol=?, invalidar_antes=? WHERE usuario=?",
+            (rol, time.time(), usuario))
         conn.commit()
     finally:
         conn.close()
+    _invalidar_cache_sesion(usuario)
     return {"usuario": usuario, "rol": rol}
 
 
@@ -538,13 +629,14 @@ def asignar_tenant(usuario: str, tenant_id: str) -> dict[str, Any]:
                             (tenant_id,)).fetchone():
             raise ValueError(f"La organización '{tenant_id}' no existe")
         cur = conn.execute(
-            "UPDATE operadores SET tenant_id=? WHERE usuario=?",
-            (tenant_id, usuario))
+            "UPDATE operadores SET tenant_id=?, invalidar_antes=? WHERE usuario=?",
+            (tenant_id, time.time(), usuario))
         conn.commit()
         if cur.rowcount == 0:
             raise ValueError(f"El usuario '{usuario}' no existe")
     finally:
         conn.close()
+    _invalidar_cache_sesion(usuario)
     return {"usuario": usuario, "tenant_id": tenant_id}
 
 

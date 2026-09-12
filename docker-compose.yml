@@ -33,7 +33,11 @@ services:
       - ./platform/skills:/app/skills:ro
       - ./platform/roe:/app/roe:ro
     ports:
-      - "8000:8000"
+      # z3 (auditoría seguridad): la API es INTERNA (la consola la consume
+      # vía su proxy). Publicarla en 0.0.0.0 exponía el backend a internet
+      # y permitía saltarse el proxy (y sus cabeceras de IP real). Solo
+      # loopback en el host; si necesitas acceso externo, usa el proxy.
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/salud').read()"]
       interval: 30s

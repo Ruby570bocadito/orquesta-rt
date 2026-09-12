@@ -1,23 +1,18 @@
+# =============================================================================
+# Reverse proxy de la consola (producción on-prem).
+#
+# z3 (auditoría de seguridad): se ELIMINÓ el handler @transform_port_query
+# que existía en el puerto :81 — permitía que cualquiera alcanzable en el
+# puerto 81 pidiera "?XTransformPort=<puerto>" y Caddy reenviara la petición
+# a CUALQUIER puerto local (SSRF: vLLM sin auth en 8001, orquestador en 8000,
+# lab en 8080...). Si alguna vez necesitas un transformador de puertos,
+# restríngelo a una red de administración y a una lista blanca de puertos.
+# =============================================================================
 :81 {
-	@transform_port_query {
-		query XTransformPort=*
-	}
-
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
-	}
-
-	handle {
-		reverse_proxy localhost:3000 {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
-	}
+        reverse_proxy localhost:3000 {
+                header_up Host {host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Real-IP {remote_host}
+        }
 }
