@@ -337,6 +337,10 @@ async def _auth_middleware(request: Request, call_next):
             401, "La sesión ya no es válida para esta cuenta: vuelve a "
                  "iniciar sesión.")
     request.state.operador = claims
+    # v34: telemetría de sesión para la higiene (throttle interno 1/min por
+    # jti — no añade una escritura por petición; jamás bloquea la petición).
+    auth.tocar_sesion(claims, request.headers.get("user-agent", ""),
+                      _clave_cliente(request))
     # --- RBAC v21: escritura exige nivel operador -------------------------
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         if (request.url.path not in RUTAS_ESCRITURA_LECTOR
@@ -2286,6 +2290,10 @@ def auth_login(p: PeticionLogin, request: Request) -> dict[str, Any]:
         raise HTTPException(401, "Credenciales incorrectas")
     token = auth.emitir_token(sesion["usuario"], sesion["rol"],
                               sesion.get("tenant_id", auth.TENANT_PREDETERMINADA))
+    # v34: la sesión nace en el registro de sesiones (higiene consultable).
+    auth.registrar_sesion(token["token"],
+                          request.headers.get("user-agent", ""),
+                          _clave_cliente(request))
     return {**sesion, **token}
 
 
@@ -2324,11 +2332,14 @@ def auth_higiene(request: Request) -> dict[str, Any]:
     estado = auth.higiene_cuenta(usuario)
     if estado is None:
         raise HTTPException(404, "La cuenta ya no existe")
+    # v34: el sub federado NO viaja a la UI — solo su presencia (booleano).
+    sso_vinculado = bool(estado.pop("sso_sub", None))
     exp = claims.get("exp")
     iat = claims.get("iat")
     ahora = int(time.time())
     return {
         **estado,
+        "sso_vinculado": sso_vinculado,
         "token": {
             "emision": iat,
             "expira_en": exp,
@@ -2336,6 +2347,20 @@ def auth_higiene(request: Request) -> dict[str, Any]:
             "sesion_valida": auth.sesion_viva(claims),
         },
     }
+
+
+@app.get("/api/auth/sesiones")
+def auth_sesiones(request: Request) -> dict[str, Any]:
+    """Sesiones ACTIVAS de la PROPIA cuenta (v34): el espejo consultable
+    del registro de sesiones del despliegue. Cada operador ve LAS SUYAS
+    (la identidad sale del token, nunca del cuerpo): dispositivo (UA),
+    IP de origen, emisión y última actividad, con su pestaña marcada.
+    Complementa «cerrar en todos los dispositivos» mostrando qué mata."""
+    claims = getattr(request.state, "operador", None) or {}
+    usuario = str(claims.get("sub") or "")
+    jti = str(claims.get("jti") or "")
+    sesiones = auth.listar_sesiones(usuario, jti_actual=jti)
+    return {"total": len(sesiones), "sesiones": sesiones}
 
 
 @app.post("/api/auth/sesion/cerrar-todas")
@@ -2502,6 +2527,10 @@ def auth_sso_callback(request: Request) -> dict[str, Any]:
         raise HTTPException(403, str(exc))
     token = auth.emitir_token(cuenta["usuario"], cuenta["rol"],
                               cuenta.get("tenant_id", auth.TENANT_PREDETERMINADA))
+    # v34: la sesión federada también nace en el registro de sesiones.
+    auth.registrar_sesion(token["token"],
+                          request.headers.get("user-agent", ""),
+                          _clave_cliente(request))
     auth.registrar_auditoria_sistema(
         cuenta["usuario"], "sso.login", "Login federado OIDC verificado")
     return {**cuenta, **token}
@@ -2530,6 +2559,28 @@ def auth_sso_vincular(p: PeticionSsoVincular, request: Request) -> dict[str, Any
     auth.registrar_auditoria_sistema(
         operador_de(request), "sso.vincular",
         f"{p.usuario} ← sub {p.sso_sub[:24]}…")
+    return resultado
+
+
+class PeticionSsoDesvincular(BaseModel):
+    """Retirada del enlace federado de una cuenta (decisión admin)."""
+    usuario: str = Field(min_length=3, max_length=32)
+
+
+@app.post("/api/auth/sso/desvincular")
+def auth_sso_desvincular(p: PeticionSsoDesvincular, request: Request) -> dict[str, Any]:
+    """Operación INVERSA de sso/vincular (v34): la cuenta vuelve a
+    autenticarse solo con su credencial local. Sin ella, enlazar sería
+    una puerta de una sola vía. Auditada con la identidad del admin."""
+    if not es_admin(request):
+        raise HTTPException(
+            403, "Solo un operador admin puede desvincular identidades federadas.")
+    try:
+        resultado = auth.desvincular_sso(p.usuario)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    auth.registrar_auditoria_sistema(
+        operador_de(request), "sso.desvincular", p.usuario)
     return resultado
 
 

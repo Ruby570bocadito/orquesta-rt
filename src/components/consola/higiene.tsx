@@ -11,16 +11,21 @@
  *  - «Cerrar sesión en todos los dispositivos»: fija el corte de
  *    revocación en ahora — muere TODO token emitido antes, INCLUIDO el
  *    actual. La credencial no se toca: no es un restablecimiento.
+ *  - v34: sesiones ACTIVAS de la cuenta (dispositivo, IP, última
+ *    actividad) — el espejo consultable del registro de sesiones; y el
+ *    indicador de enlace federado (sso_vinculado, sin exponer el sub).
  *
  * Se abre desde el chip de sesión de la cabecera; cualquier rol
  * autenticado puede consultar SU higiene (no es una vista de admin).
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, LogOut, ShieldCheck, TimerReset } from "lucide-react";
+import {
+  Loader2, LogOut, MonitorSmartphone, ShieldCheck, TimerReset,
+} from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
-  usarConsola, obtenerHigiene, cerrarSesionesPropias,
+  usarConsola, obtenerHigiene, cerrarSesionesPropias, obtenerSesiones,
 } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +37,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Insignia } from "@/components/consola/ui";
-import type { HigieneCuenta } from "@/lib/tipos";
+import type { HigieneCuenta, SesionActiva } from "@/lib/tipos";
 
 function fecha(v: string | null | undefined): string {
   if (!v) return "—";
@@ -58,6 +63,26 @@ function minutosRestantes(segundos: number | null | undefined): string {
   if (segundos < 3600) return `${Math.max(1, Math.round(segundos / 60))} min`;
   if (segundos < 86400) return `${Math.round(segundos / 3600)} h`;
   return `${Math.round(segundos / 86400)} días`;
+}
+
+/** v34 — descripción corta del dispositivo desde el user-agent real:
+ * navegador + sistema. Sin pretender una huella completa: basta para
+ * reconocer «esta es mi pestaña de trabajo» frente a una sesión ajena. */
+function dispositivo(ua: string): string {
+  if (!ua) return "dispositivo sin identificar";
+  const navegador = /Edg\//.test(ua) ? "Edge"
+    : /OPR\//.test(ua) ? "Opera"
+    : /Chrome\//.test(ua) ? "Chrome"
+    : /Firefox\//.test(ua) ? "Firefox"
+    : /Safari\//.test(ua) ? "Safari"
+    : "navegador";
+  const so = /Android/.test(ua) ? "Android"
+    : /iPhone|iPad/.test(ua) ? "iOS"
+    : /Windows/.test(ua) ? "Windows"
+    : /Mac OS/.test(ua) ? "macOS"
+    : /Linux/.test(ua) ? "Linux"
+    : "sistema desconocido";
+  return `${navegador} · ${so}`;
 }
 
 // v27 — aviso de caducidad próxima: por debajo de este umbral la sesión
@@ -88,17 +113,26 @@ export function DialogoHigiene({ abierto, onCerrar }: { abierto: boolean; onCerr
   const [cargando, setCargando] = useState(false);
   const [confirmar, setConfirmar] = useState(false);
   const [revocando, setRevocando] = useState(false);
+  // v34: sesiones activas de la cuenta (el espejo del registro de sesiones).
+  // Se cargan en paralelo con la higiene; un fallo aquí NO mata el panel —
+  // la higiene es lo crítico, la lista es telemetría consultable.
+  const [sesiones, setSesiones] = useState<SesionActiva[] | null>(null);
 
   // Carga fresca en cada apertura: el estado puede cambiar entre aperturas
-  // (corte de revocación, rol vigente tras una acción administrativa).
+  // (corte de revocación, rol vigente tras una acción administrativa,
+  // sesiones nuevas en otro dispositivo).
   useEffect(() => {
     if (!abierto) return;
     setCargando(true);
     setError(null);
+    setSesiones(null);
     obtenerHigiene()
       .then(setHigiene)
       .catch((e: Error) => setError(e.message))
       .finally(() => setCargando(false));
+    obtenerSesiones()
+      .then(setSesiones)
+      .catch(() => setSesiones(null));
   }, [abierto]);
 
   async function cerrarTodas() {
@@ -164,6 +198,11 @@ export function DialogoHigiene({ abierto, onCerrar }: { abierto: boolean; onCerr
                 </Fila>
                 <Fila etiqueta="Alta de la cuenta">{fecha(higiene.creado_en)}</Fila>
                 <Fila etiqueta="Último acceso">{fecha(higiene.ultimo_acceso)}</Fila>
+                <Fila etiqueta="Acceso federado">
+                  {higiene.sso_vinculado
+                    ? <Insignia tono="teal">vinculado (SSO)</Insignia>
+                    : <span className="text-zinc-500">solo credencial local</span>}
+                </Fila>
               </div>
 
               <div className="rounded-lg border border-line bg-panel/60 px-3 py-1.5">
@@ -203,10 +242,56 @@ export function DialogoHigiene({ abierto, onCerrar }: { abierto: boolean; onCerr
                 </div>
               )}
 
+              {/* v34: sesiones activas — el espejo consultable del registro.
+                  Cada operador ve SOLO las suyas; «esta pestaña» marca la
+                  sesión con la que se consulta el panel. */}
+              <div className="rounded-lg border border-line bg-panel/60 px-3 py-1.5">
+                <div className="flex items-center gap-2 py-2 text-xs text-zinc-400">
+                  <MonitorSmartphone className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="font-medium text-zinc-300">
+                    Sesiones activas
+                  </span>
+                  {sesiones && (
+                    <Insignia tono="slate">{sesiones.length}</Insignia>
+                  )}
+                </div>
+                {sesiones && sesiones.length > 0 ? (
+                  <div className="space-y-2 pb-2">
+                    {sesiones.map((s) => (
+                      <div key={s.jti}
+                           className="rounded-md border border-line/60 bg-raised/60 px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-xs font-medium text-zinc-200">
+                            {dispositivo(s.user_agent)}
+                          </span>
+                          {s.actual
+                            ? <Insignia tono="esmeralda">esta pestaña</Insignia>
+                            : <span className="font-mono text-[10px] text-zinc-600">{s.jti}</span>}
+                        </div>
+                        <p className="mt-1 font-mono text-[10px] leading-relaxed text-zinc-500">
+                          {s.ip || "ip desconocida"} · emitida {epoch(s.emitido_en)} · actividad {epoch(s.ultima_actividad)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="pb-2 text-[11px] text-zinc-600">
+                    {sesiones
+                      ? "ninguna sesión viva además de esta consulta"
+                      : "cargando sesiones…"}
+                  </p>
+                )}
+                <p className="border-t border-line/60 py-2 text-[11px] leading-relaxed text-zinc-500">
+                  Sesiones no expiradas emitidas tras el último corte de
+                  revocación — exactamente lo que el middleware acepta ahora.
+                </p>
+              </div>
+
               <p className="text-[11px] leading-relaxed text-zinc-500">
                 «Cerrar en todos los dispositivos» revoca <span className="text-zinc-300">todos</span> los
-                tokens emitidos antes de ahora, también el de esta pestaña.
-                Tu contraseña no cambia: podrás volver a entrar con ella.
+                tokens emitidos antes de ahora, también el de esta pestaña:
+                toda la lista anterior deja de valer a la vez. Tu contraseña
+                no cambia: podrás volver a entrar con ella.
               </p>
             </div>
           )}

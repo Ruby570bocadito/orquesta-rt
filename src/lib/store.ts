@@ -2093,6 +2093,36 @@ export async function cerrarSesionesPropias(): Promise<void> {
   usarConsola.getState().cerrarSesion();
 }
 
+/** Sesiones activas de la PROPIA cuenta (v34): el espejo consultable del
+ *  registro de tokens vivos. Superficie de usuario: cualquier rol consulta
+ *  LAS SUYAS — la identidad sale del token, nunca del cuerpo. */
+export async function obtenerSesiones(): Promise<import("./tipos").SesionActiva[]> {
+  const r = await api<{ total: number; sesiones: import("./tipos").SesionActiva[] }>(
+    "/auth/sesiones");
+  return r.sesiones;
+}
+
+/** Vinculación federada administrativa (v34): asocia el sub del IdP a una
+ *  cuenta local existente (decisión auditada del admin). Cierra la brecha
+ *  sso/vincular del inventario endpoint↔UI: el backend la soportaba desde
+ *  la v22 y nadie la llamaba desde la consola. */
+export async function vincularSso(usuario: string, ssoSub: string): Promise<void> {
+  await api("/auth/sso/vincular", {
+    method: "POST", body: JSON.stringify({ usuario, sso_sub: ssoSub }),
+  });
+  await usarConsola.getState().cargarOperadores();
+}
+
+/** Retirada del enlace federado (v34): la cuenta vuelve a autenticarse
+ *  solo con su credencial local. Operación inversa y auditada igual que
+ *  vincular — sin ella, enlazar sería una puerta de una sola vía. */
+export async function desvincularSso(usuario: string): Promise<void> {
+  await api("/auth/sso/desvincular", {
+    method: "POST", body: JSON.stringify({ usuario }),
+  });
+  await usarConsola.getState().cargarOperadores();
+}
+
 /** Copia de seguridad completa del sistema (solo admin): BDs + manifiesto SHA-256. */
 export async function descargarRespaldoCompleto(): Promise<string> {
   const r = await fetch(`${BASE}/admin/respaldo-completo`, {

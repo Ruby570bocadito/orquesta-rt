@@ -3,7 +3,7 @@
 ![CI](https://github.com/Ruby570bocadito/orquesta-rt/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![Tests](https://img.shields.io/badge/pytest-570%20tests-2EA043)
+![Tests](https://img.shields.io/badge/pytest-574%20tests-2EA043)
 ![Licencia](https://img.shields.io/badge/Licencia-propietaria%20on--prem-red)
 
 > Arquitectura agéntica completa para operaciones ofensivas **autorizadas**:
@@ -27,6 +27,8 @@ maquetas.*
 | *Panel del caso en vivo (SSE): KPIs, actividad del agente, ROE con techo de ruido y custodia.* | *ROE vivo editable (v28): techo de ruido, ventana horaria y exclusiones, auditado con identidad.* |
 | ![Hallazgos con Sigma](docs/demo/v28-04-hallazgos.png) | ![Auditoría del sistema](docs/demo/v28-08-equipo.png) |
 | *Hallazgos con detección VECTR y validación detection-as-code (Sigma) antes de entregar al SIEM.* | *Equipo multi-tenant (v28): reasignación de organización, auditoría del despliegue y respaldo completo.* |
+| ![Higiene con sesiones activas](docs/demo/v34-01-higiene-sesiones.png) | ![Acceso federado administrable](docs/demo/v34-03-dialogo-federado.png) |
+| *Higiene de cuenta (v34): sesiones activas visibles — dispositivo real, IP, última actividad y la pestaña actual marcada.* | *Acceso federado administrable (v34): vincular el sub del IdP a una cuenta local y desvincularlo, todo auditado.* |
 
 ---
 
@@ -92,7 +94,7 @@ común, y la detección del defensor es un resultado de primera clase
 | Webhooks | ✅ Real | Entrega firmada HMAC-SHA256, reintentos acotados, anti-SSRF, historial de entregas |
 | Purple teaming | ✅ Real | Registro de detección/preención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida y VALIDADOS antes de la entrega |
 | CTEM continuo | ✅ Real | Corridas continuas por cadena (programables), bucle CTEM↔purple↔Sigma: solo cuenta cobertura la regla válida que el azul verificó; anota gains y regresiones entre corridas |
-| Higiene de sesión | ✅ Real | Sesiones revocables, estado vivo de la cuenta, sign-out-everywhere, aviso de caducidad próxima del JWT |
+| Higiene de sesión | ✅ Real | Sesiones revocables, estado vivo de la cuenta, sign-out-everywhere, aviso de caducidad próxima del JWT, **sesiones activas visibles con dispositivo e IP (v34)** |
 | Cobertura ATT&CK | ✅ Real | Matriz técnica × campaña entre casos, CSV exportable, capa Navigator |
 | Copiloto IA | ✅ Real | GLM vía puente OpenAI-compatible; RAG BM25 sobre la memoria del caso; nunca ejecuta acciones |
 | Informe + cierre | ✅ Real | Markdown español con ATT&CK, DOCX/PDF, certificado de borrado documentado |
@@ -258,6 +260,12 @@ informe en español ✔ · SSO + multi-tenant + despliegue Docker/K8s ✔.
 Siguiente:
 
 - **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
+
+Completado en v34:
+
+- **Sesiones activas visibles en la higiene de cuenta**: cada login (local o federado) registra su token (jti resumido, dispositivo, IP) en el espejo consultable del registro de sesiones; el panel de higiene lista las sesiones VIVAS de la cuenta — exactamente lo que el middleware acepta hoy — marcando la pestaña actual. La lista es la contrapartida visual de «cerrar en todos los dispositivos»: muestra qué mata. Telemetría con throttle (1/min por jti) que jamás bloquea una petición.
+- **Acceso federado administrable desde la consola**: la brecha `sso/vincular` (el backend la soportaba desde la v22 sin UI) se cierra con gestión completa en Equipo — vincular el sub del IdP a una cuenta local y DESVINCULAR (`POST /api/auth/sso/desvincular`, nuevo endpoint auditado: sin la retirada, enlazar era una puerta de una sola vía). La higiene declara `sso_vinculado` sin exponer nunca el sub.
+- **Test hermetizado**: `test_api_threatled_401_y_cadena_404` ya no lee el `usuarios.db` relativo del cwd — cualquier BD residual del entorno dejaba un 401 fantasma. Suite completa: 574 passed / 9 skipped / 0 failed.
 
 Completado en v28:
 

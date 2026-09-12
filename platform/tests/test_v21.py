@@ -87,7 +87,12 @@ def test_tecnicas_ejercitadas_filtra_invalidos() -> None:
     assert tecnicas == {"T1558.003", "T1018"}
 
 
-def test_api_threatled_401_y_cadena_404() -> None:
+def test_api_threatled_401_y_cadena_404(tmp_path, monkeypatch) -> None:
+    # z1 (v34): hermético como el resto de la suite — sin el monkeypatch de
+    # RUTA_DB este test leía el usuarios.db relativo del cwd y cualquier BD
+    # residual del entorno (sin opv21) lo rompía con un 401 fantasma.
+    monkeypatch.setattr(_auth, "RUTA_DB", tmp_path / "usuarios_threatled.db")
+    monkeypatch.setattr(_auth, "_intentos", {})
     cliente = TestClient(app)
     assert cliente.get("/api/threatled/cadenas").status_code == 401
     cliente.headers.update({"Authorization": f"Bearer {_token_admin()}"})

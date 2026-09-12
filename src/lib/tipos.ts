@@ -612,5 +612,23 @@ export interface HigieneCuenta {
   creado_en: string;
   ultimo_acceso: string | null;
   invalidar_antes: number;
+  /** v34: ¿la cuenta tiene un enlace federado (sub del IdP)? */
+  sso_vinculado?: boolean;
   token: HigieneToken;
+}
+
+/** Una sesión activa de la PROPIA cuenta (GET /api/auth/sesiones, v34):
+ * espejo consultable del registro de tokens vivos del despliegue.
+ * Sin material sensible: el jti viaja resumido, nunca el token. */
+export interface SesionActiva {
+  /** Identificador resumido del token (8 primeros caracteres + …). */
+  jti: string;
+  /** ¿Es la sesión que hace la consulta (esta pestaña)? */
+  actual: boolean;
+  /** Epoch en segundos: emisión, caducidad y última actividad. */
+  emitido_en: number;
+  expira_en: number;
+  ultima_actividad: number;
+  user_agent: string;
+  ip: string;
 }

@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS sso_vinculos_preaprobados (
     creado_por TEXT NOT NULL,
     creado_en TEXT NOT NULL
 );
+-- v34: registro de sesiones emitidas (visibilidad de higiene, NO
+-- autorización — la validez la sigue decidiendo la firma + sesion_viva).
+CREATE TABLE IF NOT EXISTS sesiones (
+    jti TEXT PRIMARY KEY,
+    usuario TEXT NOT NULL,
+    emitido_en REAL NOT NULL,
+    expira_en REAL NOT NULL,
+    ultima_actividad REAL NOT NULL,
+    user_agent TEXT DEFAULT '',
+    ip TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones(usuario);
 """
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P, DKLEN = 2 ** 14, 8, 1, 32
@@ -331,15 +343,148 @@ def higiene_cuenta(usuario: str) -> Optional[dict[str, Any]]:
     Lo que un usuario puede ver de sí mismo sin material sensible: rol y
     organización VIGENTES (los del middleware de revocación, no los del
     token), fechas de alta/último acceso y el corte `invalidar_antes`.
+    v34: incluye `sso_sub` (presencia del enlace federado) — la API lo
+    convierte al booleano `sso_vinculado` y NUNCA expone el sub entero.
     Los claims del token se añaden en la API (capa de presentación)."""
     conn = _conexion()
     try:
         fila = conn.execute(
             "SELECT usuario, rol, tenant_id, creado_en, ultimo_acceso, "
-            "invalidar_antes FROM operadores WHERE usuario=?", (usuario,)).fetchone()
+            "invalidar_antes, sso_sub FROM operadores WHERE usuario=?",
+            (usuario,)).fetchone()
         return dict(fila) if fila else None
     finally:
         conn.close()
+
+
+# --- Registro de sesiones activas (v34) -------------------------------------
+# El JWT es sin estado por diseño (z3-F4 fija el corte de revocación), pero
+# la HIGIENE del operador necesita saber qué sesiones suyas están vivas y
+# desde dónde. Esta tabla es el ESPEJO consultable de los tokens emitidos:
+# nunca decide validez — la decide la firma + sesion_viva() en cada petición.
+
+# Throttle de actividad: jti → último volcado a BD (1/min evita una
+# escritura por petición; la granularidad minuto basta para higiene).
+_touch_sesiones: dict[str, float] = {}
+
+
+def registrar_sesion(token: str, user_agent: str = "", ip: str = "") -> dict[str, Any]:
+    """Registra una sesión recién emitida (login local o federado).
+
+    Se llama en los dos únicos puntos donde nace un token (POST /auth/login
+    y el callback SSO). Extrae los claims del propio token para no duplicar
+    la verdad: jti, emisión y caducidad son los del JWT real. Las filas de
+    sesiones expiradas se purgan aquí para mantener la tabla acotada."""
+    claims = verificar_token(token)
+    if not claims:
+        return {}
+    jti = str(claims.get("jti") or "")
+    if not jti:
+        return {}  # token sin jti (emitido antes de v?): sin registro
+    ahora = time.time()
+    expira = int(claims.get("exp") or 0)
+    conn = _conexion()
+    try:
+        conn.execute("DELETE FROM sesiones WHERE expira_en < ?", (ahora,))
+        conn.execute(
+            "INSERT OR REPLACE INTO sesiones "
+            "(jti, usuario, emitido_en, expira_en, ultima_actividad, "
+            " user_agent, ip) VALUES (?,?,?,?,?,?,?)",
+            (jti, str(claims.get("sub")), float(claims.get("iat") or ahora),
+             float(expira or ahora), ahora,
+             (user_agent or "")[:200], (ip or "")[:64]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"jti": f"{jti[:8]}…", "expira_en": expira}
+
+
+def tocar_sesion(claims: dict[str, Any], user_agent: str = "", ip: str = "") -> None:
+    """Actualiza la última actividad de la sesión autenticada.
+
+    Se llama desde el middleware en CADA petición: el throttle en memoria
+    (1/min por jti) evita convertir la tabla en cuello de botella. La
+    telemetría nunca bloquea una petición válida: cualquier fallo de BD
+    se traga (la visibilidad es un lujo, la sesión un derecho)."""
+    jti = str(claims.get("jti") or "")
+    if not jti:
+        return
+    ahora = time.time()
+    if ahora - _touch_sesiones.get(jti, 0.0) < 60.0:
+        return
+    if len(_touch_sesiones) > 10_000:
+        for k in [k for k, v in _touch_sesiones.items()
+                  if ahora - v > 3600.0]:
+            del _touch_sesiones[k]
+    _touch_sesiones[jti] = ahora
+    try:
+        conn = _conexion()
+        try:
+            conn.execute(
+                "UPDATE sesiones SET ultima_actividad=? WHERE jti=?",
+                (ahora, jti))
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+def listar_sesiones(usuario: str, jti_actual: str = "") -> list[dict[str, Any]]:
+    """Sesiones VIVAS de la cuenta: token no expirado Y emitido después
+    del último corte de revocación (invalidar_antes) — exactamente lo que
+    el middleware acepta hoy. Sin material sensible: el jti viaja resumido
+    (8 primeros caracteres) para que el operador reconozca SU pestaña."""
+    ahora = time.time()
+    conn = _conexion()
+    try:
+        conn.execute("DELETE FROM sesiones WHERE expira_en < ?", (ahora,))
+        conn.commit()
+        filas = conn.execute(
+            "SELECT s.jti, s.emitido_en, s.expira_en, s.ultima_actividad, "
+            "       s.user_agent, s.ip "
+            "FROM sesiones s JOIN operadores o ON o.usuario = s.usuario "
+            "WHERE s.usuario = ? AND s.expira_en > ? "
+            "      AND s.emitido_en >= COALESCE(o.invalidar_antes, 0) "
+            "ORDER BY s.emitido_en DESC",
+            (usuario, ahora)).fetchall()
+    finally:
+        conn.close()
+    return [{
+        "jti": f"{f['jti'][:8]}…",
+        "actual": bool(jti_actual) and f["jti"] == jti_actual,
+        "emitido_en": f["emitido_en"],
+        "expira_en": f["expira_en"],
+        "ultima_actividad": f["ultima_actividad"],
+        "user_agent": f["user_agent"],
+        "ip": f["ip"],
+    } for f in filas]
+
+
+def desvincular_sso(usuario: str) -> dict[str, Any]:
+    """Retira el enlace federado de una cuenta (decisión explícita del
+    admin, auditada): la cuenta vuelve a autenticarse SOLO con credencial
+    local. Operación inversa de vincular_sso_manual — sin ella, enlazar
+    sería una puerta de una sola vía."""
+    usuario = (usuario or "").strip()
+    if not usuario:
+        raise ValueError("usuario es obligatorio")
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT sso_sub FROM operadores WHERE usuario=?",
+            (usuario,)).fetchone()
+        if fila is None:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+        if not fila["sso_sub"]:
+            raise ValueError(
+                f"La cuenta '{usuario}' no tiene acceso federado vinculado")
+        conn.execute(
+            "UPDATE operadores SET sso_sub=NULL WHERE usuario=?", (usuario,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"usuario": usuario, "desvinculado": True}
 
 
 def revocar_sesiones_propias(usuario: str) -> dict[str, Any]:

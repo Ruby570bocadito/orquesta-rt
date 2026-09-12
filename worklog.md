@@ -1034,3 +1034,22 @@ Stage Summary:
 - Veredicto: el producto se sostiene en operación real (boundary, confinamiento, LLM01, webhooks, multi-tenant y custodia hacen lo que la documentación promete, verificado con las manos). Primera grieta real del operator-in-command encontrada OPERANDO (no leyendo): F38 — firma del arsenal de evasión sin identidad del payload.
 - Órdenes: z3 ataca F38 con prioridad máxima + HD-3 + tabla de "argumentos que firman" para todo el catálogo; z2 ataca HD-1 + HD-6; z1 ataca HD-2 y evalúa HD-7/HD-8 en roadmap.
 - Pendientes heredados sin cambios: rotación de secreto_jwt en despliegues derivados, revocación del PAT (tercera petición) y reconocimiento del cierre real de F32 por z3.
+Task ID: z1-sesión-6 (ronda v34)
+Agent: z1
+Task: Continuación de rondas tras la v28 (sesión 05): cerrar la propuesta de sesiones activas en la higiene y la brecha sso/vincular del dashboard; publicar la v28 pendiente de la sesión anterior.
+
+Work Log:
+- Publicación de la v28 heredada: rebase sobre main avanzada (z2 r8-9, z3 s6-7), conflicto limpio del badge (gana 522 remota) y push (c3f3bc9 + 22008db). Anomalía de entorno documentada: lecturas inestables del FS durante ~8 min hicieron parecer corrupto higiene.tsx; git (SHA-1) como árbitro lo descartó — sin bug en el repo.
+- Registro de sesiones (auth.py): tabla sesiones (jti PK, usuario, emisión, caducidad, última actividad, UA 200, IP 64) como ESPEJO consultable del middleware (jamás juez): registrar_sesion en login y callback SSO, listar_sesiones filtra por expira>ahora AND emitido>=invalidar_antes, purga de expiradas en cada acceso, tocar_sesion con throttle 1/min por jti desde el middleware (poda en memoria, traga errores de BD).
+- API: GET /api/auth/sesiones (solo las SUYAS, identidad del token; actual marcada), POST /api/auth/sso/desvincular (admin, auditada sso.desvincular; negaciones 400/403) y higiene con sso_vinculado booleano SIN exponer el sub (test de fuga).
+- Consola: tarjeta «Sesiones activas» en higiene (dispositivo, IP, emitida, actividad, «esta pestaña»), fila «Acceso federado», acción SSO/Federado en Equipo con diálogo de vinculación (sub 1-256, advertencia de copia exacta) y desvinculación; store: obtenerSesiones/vincularSso/desvincularSso.
+- Proxy de la consola (route.ts): reenvía User-Agent al backend — las capturas reales destaparon que TODA sesión vía consola nacía sin dispositivo.
+- Capturas reales v34 (Playwright, stack vivo): higiene con 2 sesiones reales (Linux + Android, «esta pestaña» correcta), Equipo con SSO/Federado, diálogo federado. DEMOSTRACION.md sección 9 + fila en la galería del README.
+- Hallazgo colateral: test_api_threatled_401_y_cadena_404 (v21) no era hermético (usuarios.db relativo del cwd → 401 fantasma con BD residual); hermetizado con tmp_path. Entorno: yara-python + ldap3 instalados en la venv del despliegue.
+- TESTS: +18 (test_v34_z1.py: espejo vs corte, purga, throttle con reloj simulado, BD rota, desvinculación feliz/negaciones/ciclo E2E con auditoría y fuga de sub descartada). Suite completa 574 passed / 9 skipped / 0 failed; tsc 0; eslint 0.
+- DOCS: docs/agentes/z1/sesion-06-v34-sesiones-visibles-sso.md + índice de la carpeta (sesiones 05 y 06) + README (badge 574, roadmap v34, capacidad de higiene) + este registro.
+
+Stage Summary:
+- Las CUATRO brechas del dashboard de la sesión 05 quedan cerradas (ROE vivo, auditoría de sistema, cross-tenant en v28; sso/vincular en v34, con desvinculación nueva incluida).
+- La higiene de cuenta es superficie completa: identidad viva, caducidad, corte, sesiones activas con dispositivo/IP y cierre global que muestra qué mata. El JWT sigue siendo sin estado: el registro es visibilidad, no autorización.
+- Siguiente ronda propuesta (sesión 06): aviso de sesión nueva por SSE, GIF comercial en dos actos, purga programada del registro por edad.

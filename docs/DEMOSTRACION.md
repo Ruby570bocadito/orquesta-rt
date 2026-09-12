@@ -166,6 +166,39 @@ revocación, emisión y caducidad del JWT (con aviso de caducidad próxima) y
 
 ---
 
+## 9. Novedades v34: sesiones activas visibles y acceso federado administrable
+
+La cuenta del operador deja de ser una caja negra: la higiene muestra QUÉ
+sesiones están vivas y el admin gestiona el enlace federado desde la consola.
+
+### 9.1 Higiene con sesiones activas
+
+Dos sesiones reales de la misma cuenta (escritorio Linux y móvil Android)
+nacen en el registro de sesiones del despliegue; el panel las lista VIVAS —
+exactamente lo que el middleware acepta — marcando la pestaña actual.
+«Cerrar en todos los dispositivos» mata toda la lista de golpe.
+
+![Higiene con sesiones activas v34](demo/v34-01-higiene-sesiones.png)
+
+### 9.2 Equipo: acceso federado por cuenta
+
+Cada fila gana la acción SSO/Federado: la cuenta con enlace del IdP la
+muestra en teal («Federado»); sin enlace, abre la vinculación. La higiene
+declara `sso_vinculado` sin exponer nunca el sub.
+
+![Equipo con acceso federado v34](demo/v34-02-equipo-sso.png)
+
+### 9.3 Diálogo del enlace federado
+
+Vincular el sub exacto del IdP o retirar el enlace (operación inversa,
+auditada: sin ella, enlazar era una puerta de una sola vía). La confianza
+la fija la decisión explícita del admin, con su identidad en la auditoría
+del sistema.
+
+![Diálogo de acceso federado v34](demo/v34-03-dialogo-federado.png)
+
+---
+
 ## Ejecuta tu propia demo
 
 ```bash

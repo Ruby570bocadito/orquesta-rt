@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Tarjeta, Insignia, TituloSeccion, Vacio } from "@/components/consola/ui";
-import { usarConsola, descargarRespaldoCompleto } from "@/lib/store";
+import {
+  usarConsola, descargarRespaldoCompleto, vincularSso, desvincularSso,
+} from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -65,6 +67,10 @@ export function VistaEquipo() {
   const [creandoOrg, setCreandoOrg] = useState(false);
   const [creando, setCreando] = useState(false);
   const [reseteo, setReseteo] = useState<{ usuario: string; clave: string } | null>(null);
+  // v34: gestión del enlace federado por cuenta (vincular/desvincular).
+  const [ssoEdicion, setSsoEdicion] = useState<{
+    usuario: string; sub: string; vinculado: boolean;
+  } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [respaldando, setRespaldando] = useState(false);
   const [cargandoAud, setCargandoAud] = useState(false);
@@ -235,6 +241,62 @@ export function VistaEquipo() {
       toast({ title: "No se pudo cargar la auditoría", variant: "destructive" });
     } finally {
       setCargandoAud(false);
+    }
+  };
+
+  // v34: vincular una identidad federada (sub del IdP) a la cuenta. La
+  // confianza la asume el admin EXPLÍCITAMENTE — el backend lo audita con
+  // su identidad. La validación replica la del servidor (1-256 chars).
+  const hacerVincularSso = async () => {
+    if (!ssoEdicion) return;
+    const sub = ssoEdicion.sub.trim();
+    if (!sub || sub.length > 256) {
+      toast({
+        title: "Sub federado inválido",
+        description: "El sub del IdP es obligatorio (máx. 256 caracteres)",
+        variant: "destructive",
+      });
+      return;
+    }
+    setOcupado(true);
+    try {
+      await vincularSso(ssoEdicion.usuario, sub);
+      toast({
+        title: "Acceso federado vinculado",
+        description: `${ssoEdicion.usuario} ← sub ${sub.slice(0, 24)}…`,
+      });
+      setSsoEdicion(null);
+    } catch (e) {
+      toast({
+        title: "No se pudo vincular",
+        description: (e as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  // v34: retirada del enlace (la cuenta vuelve a credencial local). Es la
+  // operación inversa y audita igual — sin ella, enlazar sería ida única.
+  const hacerDesvincularSso = async () => {
+    if (!ssoEdicion) return;
+    setOcupado(true);
+    try {
+      await desvincularSso(ssoEdicion.usuario);
+      toast({
+        title: "Acceso federado desvinculado",
+        description: `${ssoEdicion.usuario} vuelve a credencial local exclusiva`,
+      });
+      setSsoEdicion(null);
+    } catch (e) {
+      toast({
+        title: "No se pudo desvincular",
+        description: (e as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setOcupado(false);
     }
   };
 
@@ -436,6 +498,27 @@ export function VistaEquipo() {
 
                     <Button
                       variant="outline" size="sm"
+                      className={cn(
+                        "h-8 border-line",
+                        op.sso_sub
+                          ? "text-teal-300 hover:bg-teal-500/10 hover:text-teal-200"
+                          : "text-zinc-300 hover:bg-panel hover:text-zinc-100",
+                      )}
+                      title={op.sso_sub
+                        ? "Gestionar acceso federado (vinculado)"
+                        : "Vincular acceso federado (sub del IdP)"}
+                      onClick={() => setSsoEdicion({
+                        usuario: op.usuario,
+                        sub: "",
+                        vinculado: Boolean(op.sso_sub),
+                      })}
+                    >
+                      <Fingerprint className="mr-1.5 h-3.5 w-3.5" />
+                      {op.sso_sub ? "Federado" : "SSO"}
+                    </Button>
+
+                    <Button
+                      variant="outline" size="sm"
                       className="h-8 border-line text-zinc-300 hover:bg-panel hover:text-zinc-100"
                       onClick={() => setReseteo({ usuario: op.usuario, clave: "" })}
                     >
@@ -512,6 +595,78 @@ export function VistaEquipo() {
               Restablecer
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* v34: enlace federado por cuenta — vincular sub del IdP o retirarlo.
+          El chip de la fila (SSO / Federado) abre este diálogo con el estado
+          real de la cuenta; la operación queda en la auditoría del sistema. */}
+      <Dialog open={!!ssoEdicion} onOpenChange={(v) => !v && setSsoEdicion(null)}>
+        <DialogContent className="border-line bg-raised text-zinc-100">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Fingerprint className="h-4 w-4 text-teal-300" />
+              Acceso federado de {ssoEdicion?.usuario}
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500">
+              Enlaza el sub del IdP (Keycloak/Entra/Auth0) con esta cuenta
+              local: ese usuario federado entrará sin credencial propia. La
+              confianza la fija tu decisión de admin y queda auditada.
+            </DialogDescription>
+          </DialogHeader>
+
+          {ssoEdicion?.vinculado ? (
+            <div className="space-y-3">
+              <p className="text-xs leading-relaxed text-zinc-400">
+                Esta cuenta YA tiene un enlace federado activo (la insignia
+                «Federado» de la fila). Al desvincular, el acceso federado
+                muere en el próximo login y la cuenta exigirá su credencial
+                local de siempre — la sesión actual de esa cuenta no se toca.
+              </p>
+              <DialogFooter>
+                <Button variant="outline"
+                        className="border-line bg-transparent text-zinc-300 hover:bg-panel hover:text-zinc-100"
+                        onClick={() => setSsoEdicion(null)}>
+                  Cancelar
+                </Button>
+                <Button variant="destructive"
+                        onClick={hacerDesvincularSso} disabled={ocupado}>
+                  {ocupado && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Desvincular acceso federado
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-zinc-500">
+                  sub del IdP (subject del token federado, máx. 256)
+                </label>
+                <Input value={ssoEdicion?.sub ?? ""}
+                       onChange={(e) => setSsoEdicion(
+                         (r) => (r ? { ...r, sub: e.target.value } : r))}
+                       placeholder="p. ej. auth0|66f2ab12c9d4"
+                       className="border-line bg-panel font-mono text-xs text-zinc-100" />
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Copia el sub EXACTO de la consola del IdP: un sub equivocado
+                no daría acceso al dueño real, y un sub ya enlazado a otra
+                cuenta lo rechaza el servidor.
+              </p>
+              <DialogFooter>
+                <Button variant="outline"
+                        className="border-line bg-transparent text-zinc-300 hover:bg-panel hover:text-zinc-100"
+                        onClick={() => setSsoEdicion(null)}>
+                  Cancelar
+                </Button>
+                <Button className="bg-crimson text-white hover:bg-crimson/85"
+                        onClick={hacerVincularSso} disabled={ocupado}>
+                  {ocupado && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Vincular acceso federado
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

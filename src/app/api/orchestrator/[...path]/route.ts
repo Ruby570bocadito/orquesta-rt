@@ -11,6 +11,10 @@
  * - Propaga la IP real del operador en X-Forwarded-For: el limitador de
  *   tasa del backend distingue operadores por IP aunque pasen por este
  *   proxy (si no, TODOS compartirían el cubo de 127.0.0.1).
+ * - Propaga el User-Agent del navegador (v34): el registro de sesiones
+ *   activas de la higiene muestra el dispositivo real de cada sesión
+ *   ("Chrome · Linux"); sin esto, toda sesión vía consola nacía sin
+ *   dispositivo identificado.
  * - Para flujos SSE (/eventos) transmite el stream sin buffering ni
  *   timeout: el backend recicla la conexión cada 4 minutos y el cliente
  *   reconecta automáticamente.
@@ -83,6 +87,9 @@ async function intentar(
     const cabeceras: Record<string, string> = { "Content-Type": "application/json" };
     if (autorizacion) cabeceras["Authorization"] = autorizacion;
     if (req) {
+      // v34: el dispositivo real de la sesión (higiene: sesiones activas).
+      const agente = req.headers.get("user-agent");
+      if (agente) cabeceras["User-Agent"] = agente;
       // IP real del operador, NO suplantable:
       //  - x-real-ip lo fija el reverse proxy de confianza (Caddy) con el
       //    remote_host real y sobrescribe cualquier valor del cliente.
