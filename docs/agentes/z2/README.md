@@ -29,6 +29,7 @@ nunca se borra ni se edita el .md de otro agente).
 |---|---|---|---|
 | 01 | [sesion-01-rondas-1-2.md](sesion-01-rondas-1-2.md) | 1 y 2 | Pulimiento del núcleo: boundary ROE (ventana fail-closed, medianoche, techo de ruido), cadena de custodia (TOCTOU, orden legado), dedup de hallazgos, webhooks (reintento muerto, SSRF en 4 capas, redirects), planificador CTEM, autenticación/SSO en capas y panel de ruido. Reconciliación z2↔z3 sobre v25. |
 | 02 | [sesion-02-ronda-3.md](sesion-02-ronda-3.md) | 3 | Visibilidad e idempotencia: cabecera `X-Orquesta-Intento` en webhooks, métrica de bloqueos del limitador en `/api/salud` (solo autenticada), barra de ruido a escala del corte duro con marca del pactado, documentación de variables de endurecimiento en `deploy/README.md`. |
+| 03 | [sesion-03-ronda-4.md](sesion-03-ronda-4.md) | 4 | Canal heredado WEBHOOK_URL visible en la consola con sus entregas, techo de ruido REAL del ROE en la cola de aprobaciones + insignia de techo superado, y contrato de cabeceras webhook a prueba de deriva. |
 
 ## Convenciones
 

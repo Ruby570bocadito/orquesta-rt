@@ -748,3 +748,20 @@ Stage Summary:
 - 6 hallazgos remediados (F25-F30): total acumulado z3 → 30 fixes en 4 sesiones.
 - La capa MCP (recon/osint/evidencias/c2) vuelve a ser arrancable y sus herramientas de red ya validan dominio, fijan redirects, sane contenido externo y respetan la política TLS central.
 - Documentación: docs/agentes/agente-z3/sesion-4-mcp-superficie-y-endurecimiento.md + README índice actualizado (F1-F30).
+
+---
+Task ID: 29 (Z2-ronda-4)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 4 de pulimiento — canal heredado WEBHOOK_URL visible en la consola (con entregas), techo de ruido REAL del ROE en la cola de aprobaciones + insignia de techo superado, y contrato de cabeceras webhook a prueba de deriva.
+
+Work Log:
+- P (canal heredado): GET /api/admin/webhooks devuelve canal_heredado {activo, url} (webhook.canal_heredado_estado()); GET /api/admin/webhooks/entorno/entregas sirve las entregas registradas bajo "entorno" (404 sin WEBHOOK_URL, 403 no-admin). Vista Webhooks: tarjeta de solo-lectura con borde discontinuo + desplegable de entregas (BloqueEntregas extraído y compartido con los receptores de BD); estado vacío ya no miente si solo hay canal heredado.
+- Q (aprobaciones): el techo de ruido de la tarjeta ya no es el 50 hardcodeado — recibe engagement.roe.techo_ruido; con ruidoAcumulado >= techo, cada tarjeta pendiente muestra insignia ámbar "techo de ruido superado · acumulado X/Y".
+- R (contrato webhook): dos tests fijan que la documentación del módulo declara las 5 cabeceras X-Orquesta-* y que el despacho envía EXACTAMENTE ese conjunto — la deriva doc/código ya no puede ser silenciosa.
+- TESTS (+7, test_v28_z2.py): canal activo/inactivo en lista, entregas del canal consultables, 404 sin configurar, 403 no-admin, contrato de cabeceras x2.
+- DOCS: docs/agentes/z2/sesion-03-ronda-4.md + índice del README actualizado; este registro.
+
+Stage Summary:
+- 440 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
+- El despliegue con WEBHOOK_URL ya muestra su canal y sus entregas en la consola; las decisiones de la cola de aprobaciones llevan el contexto de ruido del ROE real.
+- Siguiente ronda propuesta (sesion-03): export Prometheus (contrato público: confirmación del operador), purga de entregas por receptor, etiqueta de ctem.corrida, pings de prueba distinguibles en el historial, SQLCipher (deferido).

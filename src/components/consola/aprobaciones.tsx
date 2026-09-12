@@ -29,6 +29,8 @@ function TarjetaAprobacion({
   tecnica,
   riesgo,
   ruido,
+  techoRuido,
+  ruidoAcumulado,
   motivo,
   referenciaRoe,
   fase,
@@ -43,6 +45,10 @@ function TarjetaAprobacion({
   tecnica?: string | null;
   riesgo: "critica" | "alta" | "media" | "baja" | "informativa";
   ruido: number;
+  /** z2-ronda-4: techo pactado del ROE REAL del caso (antes hardcodeado a
+   *  50: con un ROE de techo 30 la barra y la cifra mentían). */
+  techoRuido: number;
+  ruidoAcumulado: number;
   motivo: string;
   referenciaRoe: string;
   fase: string;
@@ -51,7 +57,10 @@ function TarjetaAprobacion({
 }) {
   const [dialogo, setDialogo] = useState<"aprobar" | "rechazar" | null>(null);
   const [comentario, setComentario] = useState("");
-  const techo = 50;
+  // z2-ronda-4: el nivel PACTADO ya cruzado por el ruido acumulado del caso
+  // — aprobar esta acción añade ruido SOBRE el nivel excedido (el corte duro
+  // sigue en techo × 5: guardrails._MARGEN_TECHO_RUIDO).
+  const techoSuperado = ruidoAcumulado >= techoRuido;
 
   return (
     <motion.div
@@ -66,6 +75,11 @@ function TarjetaAprobacion({
               <InsigniaSeveridad severidad={riesgo} />
               <Insignia tono="slate">{ETIQUETA_FASE[fase as keyof typeof ETIQUETA_FASE] ?? fase}</Insignia>
               {tecnica && <code className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">ATT&CK {tecnica}</code>}
+              {techoSuperado && (
+                <Insignia tono="ambar">
+                  techo de ruido superado · acumulado {ruidoAcumulado}/{techoRuido}
+                </Insignia>
+              )}
             </div>
             <h3 className="text-sm font-semibold text-zinc-100">{titulo}</h3>
           </div>
@@ -100,7 +114,7 @@ function TarjetaAprobacion({
                 />
               </div>
               <span className="font-mono text-[10px] text-zinc-400">
-                {ruido}/{techo}
+                {ruido}/{techoRuido}
               </span>
             </div>
           </div>
@@ -182,6 +196,10 @@ function TarjetaAprobacion({
 export function VistaAprobaciones() {
   const aprobaciones = usarConsola((s) => s.aprobaciones);
   const decidir = usarConsola((s) => s.decidir);
+  // z2-ronda-4: ROE real del caso para el techo de ruido + ruido acumulado
+  // (la cola avisa sola cuando el nivel pactado ya está cruzado).
+  const techoRuido = usarConsola((s) => s.engagement?.roe.techo_ruido ?? 50);
+  const ruidoAcumulado = usarConsola((s) => s.ruidoAcumulado);
 
   const pendientes = aprobaciones.filter((a) => a.estado === "pendiente");
   const decididas = aprobaciones.filter((a) => a.estado !== "pendiente");
@@ -208,6 +226,8 @@ export function VistaAprobaciones() {
                 tecnica={a.tecnica_mitre}
                 riesgo={a.riesgo}
                 ruido={a.ruido_estimado}
+                techoRuido={techoRuido}
+                ruidoAcumulado={ruidoAcumulado}
                 motivo={a.motivo}
                 referenciaRoe={a.referencia_roe}
                 fase={a.fase}

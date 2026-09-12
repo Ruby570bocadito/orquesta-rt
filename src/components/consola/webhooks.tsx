@@ -31,10 +31,40 @@ const ETIQUETA_EVENTO: Record<string, string> = {
   "webhook.prueba": "Ping de prueba",
 };
 
+/** Bloque de entregas compartido por receptores de BD y el canal heredado
+ *  (z2-ronda-4): mismo registro, mismo formato — el receptor "entorno" es
+ *  el canal heredado WEBHOOK_URL. */
+function BloqueEntregas({ id, entregas }: { id: string; entregas: Record<string, EntregaWebhook[]> }) {
+  return (
+    <div className="mt-2 rounded-md border border-line bg-ink p-2">
+      {(entregas[id] ?? []).length === 0 ? (
+        <p className="px-1 text-[11px] text-zinc-500">Sin entregas registradas todavía</p>
+      ) : (
+        <ul className="space-y-1">
+          {entregas[id].map((e, i) => (
+            <li key={i} className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
+              <span className={e.ok ? "text-emerald-300" : "text-red-300"}>
+                {e.ok ? "OK" : "FALLO"}{e.http ? ` ${e.http}` : ""}
+              </span>
+              <span className="text-zinc-400">{ETIQUETA_EVENTO[e.evento] ?? e.evento}</span>
+              <span className="text-zinc-600">{e.engagement_id}</span>
+              {e.intentos > 1 && <span className="text-amber-300">{e.intentos} intentos</span>}
+              {e.error && <span className="text-red-300/80">{e.error.slice(0, 90)}</span>}
+              <span className="ml-auto text-zinc-600">{new Date(e.creado_en).toLocaleString("es-ES")}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function SeccionWebhooks() {
   const sesion = usarConsola((s) => s.sesion);
   const webhooks = usarConsola((s) => s.webhooks);
   const eventosCatalogo = usarConsola((s) => s.eventosWebhook);
+  // z2-ronda-4: canal heredado WEBHOOK_URL (visible y con sus entregas)
+  const canalHeredado = usarConsola((s) => s.canalHeredado);
   const cargarWebhooks = usarConsola((s) => s.cargarWebhooks);
   const crearWebhook = usarConsola((s) => s.crearWebhook);
   const actualizarWebhook = usarConsola((s) => s.actualizarWebhook);
@@ -219,7 +249,7 @@ export function SeccionWebhooks() {
         </motion.div>
       )}
 
-      {lista.length === 0 && !abierto ? (
+      {lista.length === 0 && !canalHeredado?.activo && !abierto ? (
         <Vacio mensaje="Sin receptores configurados: los eventos operativos no se notifican a ningún canal todavía" />
       ) : (
         <ul className="space-y-3">
@@ -277,30 +307,40 @@ export function SeccionWebhooks() {
                   </p>
                 )}
                 {entregasDe === w.id && (
-                  <div className="mt-2 rounded-md border border-line bg-ink p-2">
-                    {(entregas[w.id] ?? []).length === 0 ? (
-                      <p className="px-1 text-[11px] text-zinc-500">Sin entregas registradas todavía</p>
-                    ) : (
-                      <ul className="space-y-1">
-                        {entregas[w.id].map((e, i) => (
-                          <li key={i} className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
-                            <span className={e.ok ? "text-emerald-300" : "text-red-300"}>
-                              {e.ok ? "OK" : "FALLO"}{e.http ? ` ${e.http}` : ""}
-                            </span>
-                            <span className="text-zinc-400">{ETIQUETA_EVENTO[e.evento] ?? e.evento}</span>
-                            <span className="text-zinc-600">{e.engagement_id}</span>
-                            {e.intentos > 1 && <span className="text-amber-300">{e.intentos} intentos</span>}
-                            {e.error && <span className="text-red-300/80">{e.error.slice(0, 90)}</span>}
-                            <span className="ml-auto text-zinc-600">{new Date(e.creado_en).toLocaleString("es-ES")}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
+                  <BloqueEntregas id={w.id} entregas={entregas} />
                 )}
               </li>
             );
           })}
+        </ul>
+      )}
+
+      {/* z2-ronda-4: canal heredado WEBHOOK_URL — vive en el ENTORNO del
+          despliegue, no en la BD, así que no salía entre los receptores y
+          el operador no veía sus entregas. Lectura solo: se configura por
+          entorno y pasa por el mismo veto SSRF que los receptores. */}
+      {canalHeredado?.activo && (
+        <ul className="mt-3 space-y-3">
+          <li className="rounded-lg border border-dashed border-line bg-ink/40 p-3.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100" title={canalHeredado.url}>
+                {canalHeredado.url}
+              </p>
+              <Insignia tono="slate">canal heredado · WEBHOOK_URL</Insignia>
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              recibe TODOS los eventos · se configura por entorno (no en la consola) ·
+              mismo veto SSRF y firma que los receptores de la BD
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 border-line bg-panel text-[11px] text-zinc-300 hover:bg-raised"
+                onClick={() => verEntregas("entorno")}>
+                {entregasDe === "entorno" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                Entregas
+              </Button>
+            </div>
+            {entregasDe === "entorno" && <BloqueEntregas id="entorno" entregas={entregas} />}
+          </li>
         </ul>
       )}
 

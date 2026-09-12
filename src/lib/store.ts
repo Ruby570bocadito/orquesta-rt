@@ -504,6 +504,8 @@ interface EstadoConsola {
   // webhooks de notificación (admin)
   webhooks: ReceptorWebhook[] | null;
   eventosWebhook: string[];
+  /** z2-ronda-4: canal heredado WEBHOOK_URL (no vive en la BD). */
+  canalHeredado: { activo: boolean; url: string } | null;
   webhooksOcupado: boolean;
   // equipo (admin)
   operadores: OperadorCuenta[] | null;
@@ -806,6 +808,7 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
   organizaciones: null,
   webhooks: null,
   eventosWebhook: [],
+  canalHeredado: null,
   webhooksOcupado: false,
   operadores: null,
   difSuperficie: null,
@@ -1505,12 +1508,16 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
   // Webhooks de notificación operativa (v16, admin)
   async cargarWebhooks() {
     try {
-      const r = await api<{ receptores: ReceptorWebhook[]; eventos: string[] }>(
-        "/admin/webhooks");
-      set({ webhooks: r.receptores, eventosWebhook: r.eventos });
+      // z2-ronda-4: canal_heredado (WEBHOOK_URL) viaja junto a los receptores
+      const r = await api<{
+        receptores: ReceptorWebhook[]; eventos: string[];
+        canal_heredado?: { activo: boolean; url: string };
+      }>("/admin/webhooks");
+      set({ webhooks: r.receptores, eventosWebhook: r.eventos,
+            canalHeredado: r.canal_heredado ?? null });
     } catch {
       // no-admin o backend caído: la vista muestra el estado correspondiente
-      set({ webhooks: [], eventosWebhook: [] });
+      set({ webhooks: [], eventosWebhook: [], canalHeredado: null });
     }
   },
 

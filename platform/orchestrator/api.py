@@ -2898,10 +2898,15 @@ def _modulo_webhook():
 
 @app.get("/api/admin/webhooks")
 def webhooks_lista(request: Request) -> dict[str, Any]:
-    """Receptores configurados (SIN secretos) y catálogo de eventos."""
+    """Receptores configurados (SIN secretos) y catálogo de eventos.
+
+    z2 (ronda 4): incluye el estado del canal heredado WEBHOOK_URL — no
+    vive en la BD y sus entregas se registran bajo el id "entorno"; sin
+    esto, un despliegue con canal heredado parecía "sin notificaciones"."""
     _admin_webhooks(request)
     wh = _modulo_webhook()
-    return {"receptores": wh.listar_webhooks(), "eventos": list(wh.EVENTOS)}
+    return {"receptores": wh.listar_webhooks(), "eventos": list(wh.EVENTOS),
+            "canal_heredado": wh.canal_heredado_estado()}
 
 
 @app.post("/api/admin/webhooks")
@@ -2971,9 +2976,17 @@ def webhooks_probar(webhook_id: str, request: Request) -> dict[str, Any]:
 @app.get("/api/admin/webhooks/{webhook_id}/entregas")
 def webhooks_entregas(webhook_id: str, request: Request,
                       limite: int = 20) -> list[dict[str, Any]]:
-    """Últimas entregas del receptor (resultado HTTP real de cada una)."""
+    """Últimas entregas del receptor (resultado HTTP real de cada una).
+
+    z2 (ronda 4): el identificador especial "entorno" devuelve las entregas
+    del canal heredado WEBHOOK_URL (registradas bajo ese id por
+    _receptores_de). Sin canal configurado → 404 (no existe el receptor)."""
     _admin_webhooks(request)
     wh = _modulo_webhook()
+    if webhook_id == "entorno":
+        if not wh.canal_heredado_estado()["activo"]:
+            raise HTTPException(404, "canal heredado WEBHOOK_URL no configurado")
+        return wh.entregas_de("entorno", limite)
     if not any(w["id"] == webhook_id for w in wh.listar_webhooks()):
         raise HTTPException(404, f"webhook {webhook_id} no existe")
     return wh.entregas_de(webhook_id, limite)

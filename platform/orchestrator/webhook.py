@@ -524,3 +524,14 @@ def estado() -> dict[str, Any]:
         "canal_heredado": bool(url),
         "eventos": list(EVENTOS),
     }
+
+
+def canal_heredado_estado() -> dict[str, Any]:
+    """z2 (ronda 4): estado del canal heredado para la consola (admin).
+
+    El canal heredado (WEBHOOK_URL) no vive en la BD: sus entregas se
+    registran bajo el identificador literal "entorno" y por eso no aparecía
+    entre los receptores de la vista Webhooks — el operador no podía ver si
+    el entorno tenía un canal activo ni sus entregas."""
+    url = os.environ.get("WEBHOOK_URL", "").strip()
+    return {"activo": bool(url), "url": url}
