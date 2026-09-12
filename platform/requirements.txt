@@ -13,7 +13,10 @@ rich>=13.9
 cryptography>=43.0
 
 # Servidores MCP (SDK oficial)
-mcp>=1.1.2
+# Tope <2 OBLIGATORIO: el SDK 2.x renombró FastMCP→MCPServer y cambia otras
+# APIs (migración pendiente); sin el tope, una instalación limpia rompe los
+# servidores y 11 tests de la suite (sesión 01 del z-director).
+mcp>=1.1.2,<2
 
 # Recon pasivo / sondeo HTTP
 dnspython>=2.7
