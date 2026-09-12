@@ -107,7 +107,17 @@ def _veto_metadatos_activo() -> bool:
     return os.environ.get("WEBHOOK_PERMITIR_METADATOS", "") != "1"
 
 
-MAX_ENTREGAS = 500  # poda del registro de entregas por despliegue
+MAX_ENTREGAS = 500  # poda global del registro de entregas por despliegue
+
+# z2 (ronda 5): techo de entregas POR RECEPTOR. La poda global POR SÍ SOLA
+# dejaba
+# que un receptor muy activo (p. ej. suscrito a todo en un despliegue con
+# mucho tráfico) desplazase el historial de los demás: la ventana de
+# diagnóstico de 500 líneas se la comía un solo receptor y el admin dejaba
+# de ver por qué el receptor silencioso no recibía nada. Con el techo por
+# receptor (aplicado también al canal heredado "entorno") la ventana es
+# equitativa; la poda global se conserva como guarda del tamaño total.
+MAX_ENTREGAS_RECEPTOR = 100
 
 
 def _ruta_db() -> Path:
@@ -414,7 +424,18 @@ def _registrar_entrega(webhook_id: str, evento: str, engagement_id: str,
                 " ok, http, error, intentos, creado_en) VALUES (?,?,?,?,?,?,?,?)",
                 (webhook_id, evento, engagement_id, 1 if ok else 0, http,
                  error, intentos, datetime.now(timezone.utc).isoformat()))
-            # Poda: conserva las últimas MAX_ENTREGAS del despliegue.
+            # Poda por RECEPTOR (z2, ronda 5): conserva las últimas
+            # MAX_ENTREGAS_RECEPTOR de ESTE receptor — un receptor parlanchín
+            # ya no desplaza el historial de los demás (la ventana de
+            # diagnóstico es equitativa). Aplica también al canal heredado
+            # ("entorno"), que no tiene fila en la tabla webhooks pero sí
+            # entregas con su id.
+            conn.execute(
+                "DELETE FROM webhook_entregas WHERE webhook_id=? AND id NOT IN "
+                "(SELECT id FROM webhook_entregas WHERE webhook_id=? "
+                "ORDER BY id DESC LIMIT ?)",
+                (webhook_id, webhook_id, MAX_ENTREGAS_RECEPTOR))
+            # Poda GLOBAL: guarda del tamaño total del registro (despliegue).
             conn.execute(
                 "DELETE FROM webhook_entregas WHERE id NOT IN "
                 "(SELECT id FROM webhook_entregas ORDER BY id DESC LIMIT ?)",
@@ -514,11 +535,16 @@ def estado() -> dict[str, Any]:
     except sqlite3.Error:
         activos = 0
     url = os.environ.get("WEBHOOK_URL", "")
+    # z2 (ronda 5): resumen honesto cuando coexisten los dos canales — antes
+    # la URL del entorno TAPABA el recuento de receptores de BD (`url or ...`)
+    # y un despliegue con ambos parecía tener solo el canal heredado.
+    canales = ([url] if url else []) \
+        + ([f"{activos} receptor(es) en BD"] if activos else [])
     return {
         "configurado": bool(activos) or bool(url),
         "detalle": "POST real firmado (HMAC-SHA256) con registro de entregas · "
                    "receptores configurables en Integraciones (admin)",
-        "servidor": url or (f"{activos} receptor(es) en BD" if activos else ""),
+        "servidor": " + ".join(canales),
         "firmado": True,
         "receptores_activos": activos,
         "canal_heredado": bool(url),

@@ -28,12 +28,19 @@ const ETIQUETA_EVENTO: Record<string, string> = {
   "aprobacion.solicitada": "Aprobación solicitada",
   "aprobacion.decidida": "Aprobación decidida",
   "roe.parada_emergencia": "Parada de emergencia",
+  // z2-ronda-5: faltaba desde v23 — el chip de suscripción y las filas de
+  // entregas caían al nombre crudo "ctem.corrida" (test de contrato en
+  // test_v29_z2.py impide que un evento nuevo vuelva a llegar sin etiqueta).
+  "ctem.corrida": "Corrida CTEM",
   "webhook.prueba": "Ping de prueba",
 };
 
 /** Bloque de entregas compartido por receptores de BD y el canal heredado
  *  (z2-ronda-4): mismo registro, mismo formato — el receptor "entorno" es
- *  el canal heredado WEBHOOK_URL. */
+ *  el canal heredado WEBHOOK_URL.
+ *  z2-ronda-5: los pings de prueba (webhook.prueba, engagement "prueba")
+ *  llevan firma visual propia — antes una fila de ping se veía IGUAL que
+ *  una entrega operativa real y el historial confundía al diagnosticar. */
 function BloqueEntregas({ id, entregas }: { id: string; entregas: Record<string, EntregaWebhook[]> }) {
   return (
     <div className="mt-2 rounded-md border border-line bg-ink p-2">
@@ -41,18 +48,28 @@ function BloqueEntregas({ id, entregas }: { id: string; entregas: Record<string,
         <p className="px-1 text-[11px] text-zinc-500">Sin entregas registradas todavía</p>
       ) : (
         <ul className="space-y-1">
-          {entregas[id].map((e, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
-              <span className={e.ok ? "text-emerald-300" : "text-red-300"}>
-                {e.ok ? "OK" : "FALLO"}{e.http ? ` ${e.http}` : ""}
-              </span>
-              <span className="text-zinc-400">{ETIQUETA_EVENTO[e.evento] ?? e.evento}</span>
-              <span className="text-zinc-600">{e.engagement_id}</span>
-              {e.intentos > 1 && <span className="text-amber-300">{e.intentos} intentos</span>}
-              {e.error && <span className="text-red-300/80">{e.error.slice(0, 90)}</span>}
-              <span className="ml-auto text-zinc-600">{new Date(e.creado_en).toLocaleString("es-ES")}</span>
-            </li>
-          ))}
+          {entregas[id].map((e, i) => {
+            const esPrueba = e.evento === "webhook.prueba";
+            return (
+              <li key={i}
+                className={cn(
+                  "flex flex-wrap items-center gap-2 font-mono text-[10px]",
+                  esPrueba && "rounded border border-dashed border-line bg-panel/40 px-1.5 py-0.5 opacity-80",
+                )}
+              >
+                <span className={e.ok ? "text-emerald-300" : "text-red-300"}>
+                  {e.ok ? "OK" : "FALLO"}{e.http ? ` ${e.http}` : ""}
+                </span>
+                {esPrueba
+                  ? <span className="rounded-full border border-slate-500/40 bg-slate-500/10 px-1.5 py-px text-slate-300">ping de prueba</span>
+                  : <span className="text-zinc-400">{ETIQUETA_EVENTO[e.evento] ?? e.evento}</span>}
+                <span className="text-zinc-600">{e.engagement_id}</span>
+                {e.intentos > 1 && <span className="text-amber-300">{e.intentos} intentos</span>}
+                {e.error && <span className="text-red-300/80">{e.error.slice(0, 90)}</span>}
+                <span className="ml-auto text-zinc-600">{new Date(e.creado_en).toLocaleString("es-ES")}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

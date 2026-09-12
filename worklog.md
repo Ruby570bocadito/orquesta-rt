@@ -800,3 +800,23 @@ Stage Summary:
 - 3 hallazgos remediados (F31-F33): total acumulado z3 → 33 fixes en 5 sesiones.
 - La analítica de programa respeta el aislamiento multi-tenant (JSON y CSV); el repo deja de llevar material de credenciales (usuarios.db) ni BDs de caso en el índice.
 - Documentación: docs/agentes/agente-z3/sesion-5-analitica-tenant-y-higiene-repo.md + README índice actualizado (F1-F33).
+
+---
+Task ID: 31 (Z2-ronda-5)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 5 de pulimiento — las tres propuestas heredadas de la ronda 4 que no exigían decisión del operador (poda de entregas por receptor, etiqueta ctem.corrida, pings de prueba distinguibles) + un cuarto defecto de honestidad hallado durante la investigación (resumen de canales que se tapaban entre sí).
+
+Work Log:
+- Base: main 053e93a (v27 de z1 integrado). Línea base verificada: 492 passed / 8 skipped.
+- S1 (webhook.py): poda de webhook_entregas POR RECEPTOR (MAX_ENTREGAS_RECEPTOR=100, incluido el canal heredado "entorno") — antes la poda solo global (500) dejaba que un receptor parlanchín se comiera la ventana de diagnóstico de los receptores silenciosos; la poda global se conserva como guarda del tamaño total.
+- T1 (webhooks.tsx): etiqueta "Corrida CTEM" para ctem.corrida — caía al nombre crudo desde v23.
+- T2 (test_v29_z2.py): contrato BIDIRECCIONAL catálogo de eventos ≡ etiquetas del frontend (parser del tsx con comentarios de línea limpiados): todo evento del backend tiene etiqueta y toda etiqueta es un evento real — la deriva T1 ya no puede volver en silencio.
+- U1 (webhooks.tsx): las filas webhook.prueba del historial llevan firma visual propia (borde discontinuo + chip "ping de prueba" slate) — antes se veían IGUAL que una entrega operativa real al diagnosticar un receptor.
+- V1 (webhook.py): estado()["servidor"] nombra AMBOS canales cuando coexisten ("URL + N receptor(es) en BD") — antes la WEBHOOK_URL tapaba el recuento de receptores de BD (url or ...).
+- TESTS (+10, test_v29_z2.py): techo por receptor del parlanchín (conserva las más recientes), el parlanchín no desplaza al silencioso, techo aplicado al canal heredado, poda global sigue activa como guarda (monkeypatch de constantes), invariante RECEPTOR < GLOBAL de diseño, contrato de etiquetas x2, estado() con ambos canales / solo heredado / solo BD.
+- DOCS: docs/agentes/z2/sesion-04-ronda-5.md + índice del README de la carpeta + z2.md (punta de rastro) actualizados; este registro.
+
+Stage Summary:
+- 502 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
+- La ventana de entregas webhook es equitativa entre receptores; el catálogo de eventos backend↔frontend está protegido contra deriva por contrato; los pings de prueba se distinguen a simple vista del tráfico real.
+- Siguiente ronda propuesta (sesion-04): export Prometheus (confirmación del operador, pendiente desde ronda 3), rotación de secreto de receptor con doble ventana, insignia "N fallos en 24 h" por receptor en la vista, webhook.prueba exento del techo por receptor (cuantificar antes), SQLCipher (deferido).
