@@ -531,3 +531,26 @@ Stage Summary:
 - El SSO federado es real de extremo a extremo y las pruebas de operador capturaron 3 bugs de integración RBAC/UI que ningún test unitario veía: los lectores federados ya consultan rutas y CVEs sin 403 falsos, y las denegaciones muestran su mensaje.
 - El motor Neo4j del laboratorio sirve rutas de ataque reales con esquema BloodHound y el NVD completa el intel sin MISP.
 - Entregables: repo Ruby570bocadito/orquesta-rt (main=c89152a+fixes) y download/orquesta-rt-plataforma-v22.zip.
+
+---
+Task ID: 23
+Agent: main (Super Z)
+Task: Ronda v23 — auditoría de estado + victorias rápidas (README real, CI GitHub Actions) + modo continuo CTEM (corridas con delta real entre corridas).
+
+Work Log:
+- AUDITORÍA SOLICITADA ("qué le falta"): verificado en vivo qué existía y qué no → README congelado en v9 (decía "13 tests", "lab simulado MOCK", 0 imágenes incrustadas), sin CI, sin modo continuo CTEM, MISP sin instancia de lab. Prioridades ejecutadas por orden.
+- README REESCRITO (v22 real): badges (CI/Python/Next/pytest/licencia), GIF recorrido + 2 capturas incrustadas, capacidades reales en tabla (AD/persistencia/evasión/phishing/threat-led/rutas/SPO/multi-tenant/webhooks/purple/analítica), estructura de repo actualizada (27 módulos orquestador + integraciones + lab + deploy), arranque local/Codespaces/Docker/K8s/lab, seguridad del producto, roadmap honesto.
+- CI (nueva): .github/workflows/ci.yml — job backend (pytest completo en Python 3.12 con cache pip) + job consola (bun install --frozen-lockfile, tsc --noEmit, eslint). Sin secretos.
+- PUSH GITHUB: d35c7d6 → main en Ruby570bocadito/orquesta-rt con PAT transitorio en memoria (nunca en ficheros); recordatorio de rotación reiterado.
+- CTEM (orchestrator/ctem.py nuevo): corrida = instantánea REAL del caso (técnicas ejercitadas de hallazgos+auditoría, detecciones VECTR por estado, hallazgos por severidad, aprobaciones pendientes, acciones boundary:permitir) contrastada con plan_para_caso + delta honesto contra la corrida anterior (nuevas técnicas/hallazgos/detecciones, cobertura antes→después; primera corrida declarada explícitamente). Programas persistentes (ctem_programas, intervalo 1-720 h, reprogramación idempotente), corridas con custodia (evidencia JSON hash+HMAC) y auditoría (Actor HUMANO manual / SISTEMA programada). Planificador del despliegue: bucle asyncio en lifespan (CTEM_SEGUNDOS, 60 s por defecto) ejecuta programas vencidos en TODOS los casos sin tumbar la API; fallo de una BD no detiene las demás.
+- API v23: GET /engagements/{id}/ctem (lectura pura), POST .../ctem/programas (RBAC ≥2 automático), POST .../ctem/corridas (dispara webhook ctem.corrida a receptores suscritos), DELETE .../ctem/programas/{pid}; validación 404 cadena con guía, 422 intervalos, 404 caso. EVENTOS webhook ampliado con "ctem.corrida".
+- UI: sección compacta "Continuidad (CTEM)" en Cadenas (menos cargada: integrada, no vista nueva) — selector cadena+intervalo, corrida ahora, programar, chips de programas activos con cancelar, delta del último resumen y últimas 5 corridas con evidencia. Store: cargarCtem/corridaCtem/programarCtem/cancelarCtem + tipos DeltaCtem/CorridaCtem/ProgramaCtem/EstadoCtem; toast de import añadido a store.ts (lo necesitaba por primera vez).
+- TESTS (test_v23.py, 13): migración idempotente, primera corrida honesta, delta tras hallazgo real (T1558.003), delta de detecciones VECTR, auditoría+custodia con cadena VÁLIDA, validación de intervalos y cadena fantasma, planificador ejecuta SOLO lo vencido y desplaza proxima_corrida_en, cancelar conserva historial, flujo API completo, 404/422, RBAC lector (GET 200; corrida/programar/cancelar 403), evento webhook ctem.corrida en catálogo y validación de eventos inventados.
+- BUG CORREGIDO EN CONSTRUCCIÓN: filtro de acciones ejecutadas usaba resultado "aprobado" (inexistente) — el valor real del boundary para ejecución es "permitir"; corregido con comentario que lo documenta.
+- VALIDACIÓN: 303/303 pytest (290 + 13 v23), tsc 0, eslint 0, reinicio quirúrgico del orquestador (PID nuevo), /api/salud ok, endpoints CTEM en vivo 401 sin identidad (protección activa), api.log sin 500. E2E de navegador completo NO ejecutado en esta ronda (credenciales del admin no disponibles en contexto); la API está cubierta por la suite completa con TestClient.
+- EMPAQUETADO: scripts/empaquetar.py → download/orquesta-rt-plataforma-v23.zip (verificado anti-secretos).
+
+Stage Summary:
+- La plataforma ahora compite en el eje que define el sector (CTEM/AEV): la exposición se mide continuamente con delta real entre corridas, no con informes puntuales.
+- El escaparate (README) muestra por fin lo que el proyecto ES, con el GIF y capturas reales de la demo; la CI ejecuta 303 tests en cada push.
+- Siguiente: instancia MISP de lab (docker-compose.lab.yml), ingestión del dominio real del usuario al motor Neo4j, validación Sigma en vivo.

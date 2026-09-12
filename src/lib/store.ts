@@ -13,6 +13,7 @@
  */
 
 import { create } from "zustand";
+import { toast } from "@/hooks/use-toast";
 import {
   Aprobacion,
   CatalogoTecnicas,
@@ -493,6 +494,8 @@ interface EstadoConsola {
   cadenas: import("./tipos").ResumenCadena[] | null;
   planThreatled: import("./tipos").PlanThreatled | null;
   threatledOcupado: boolean;
+  ctem: import("./tipos").EstadoCtem | null;
+  ctemOcupado: boolean;
   organizaciones: import("./tipos").Organizacion[] | null;
   // webhooks de notificación (admin)
   webhooks: ReceptorWebhook[] | null;
@@ -553,6 +556,11 @@ interface EstadoConsola {
   // planificación threat-led (v21)
   cargarCadenas(): Promise<void>;
   generarPlanThreatled(cadenaId: string): Promise<void>;
+  // modo continuo CTEM (v23)
+  cargarCtem(): Promise<void>;
+  corridaCtem(cadenaId: string): Promise<void>;
+  programarCtem(cadenaId: string, intervaloHoras: number): Promise<void>;
+  cancelarCtem(programaId: string): Promise<void>;
   cargarOrganizaciones(): Promise<void>;
   crearOrganizacion(id: string, nombre: string): Promise<void>;
   // webhooks de notificación (admin)
@@ -789,6 +797,8 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
   cadenas: null,
   planThreatled: null,
   threatledOcupado: false,
+  ctem: null,
+  ctemOcupado: false,
   organizaciones: null,
   webhooks: null,
   eventosWebhook: [],
@@ -1392,6 +1402,80 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
       set({ threatledOcupado: false });
       throw error;
     }
+  },
+
+  // Modo continuo CTEM (v23): la exposición se mide periódicamente.
+  async cargarCtem() {
+    const caso = get().casoActivo;
+    if (!caso) {
+      set({ ctem: null });
+      return;
+    }
+    try {
+      const ctem = await api<import("./tipos").EstadoCtem>(
+        `/engagements/${caso}/ctem`);
+      set({ ctem });
+    } catch {
+      set({ ctem: null });
+    }
+  },
+
+  async corridaCtem(cadenaId: string) {
+    const caso = get().casoActivo;
+    if (!caso) throw new Error("Selecciona un caso para lanzar la corrida");
+    set({ ctemOcupado: true });
+    try {
+      const resumen = await api<import("./tipos").CorridaCtem["resumen"]>(
+        `/engagements/${caso}/ctem/corridas`,
+        { method: "POST", body: JSON.stringify({ cadena_id: cadenaId }) });
+      set({ ctemOcupado: false });
+      await get().cargarCtem();
+      const d = resumen.delta;
+      if (d) {
+        toast({
+          title: d.primera_corrida
+            ? "Primera corrida registrada (base de la serie)"
+            : `Delta: +${d.hallazgos_nuevos} hallazgos · +${d.detecciones_nuevas} detecciones`,
+          description: d.primera_corrida
+            ? `Cobertura actual: ${resumen.cobertura?.ejercitados}/${resumen.cobertura?.total} ejercitados · evidencia custodiada`
+            : `Nuevas técnicas: ${d.nuevas_tecnicas.length ? d.nuevas_tecnicas.join(", ") : "ninguna"}`,
+        });
+      }
+    } catch (error) {
+      set({ ctemOcupado: false });
+      throw error;
+    }
+  },
+
+  async programarCtem(cadenaId: string, intervaloHoras: number) {
+    const caso = get().casoActivo;
+    if (!caso) throw new Error("Selecciona un caso para programar la cadena");
+    set({ ctemOcupado: true });
+    try {
+      await api(`/engagements/${caso}/ctem/programas`, {
+        method: "POST",
+        body: JSON.stringify({ cadena_id: cadenaId, intervalo_horas: intervaloHoras }),
+      });
+      set({ ctemOcupado: false });
+      await get().cargarCtem();
+      toast({
+        title: "Cadena en modo continuo",
+        description: `Corrida automática cada ${intervaloHoras} h (planificador del despliegue).`,
+      });
+    } catch (error) {
+      set({ ctemOcupado: false });
+      throw error;
+    }
+  },
+
+  async cancelarCtem(programaId: string) {
+    const caso = get().casoActivo;
+    if (!caso) return;
+    await api(`/engagements/${caso}/ctem/programas/${programaId}`, {
+      method: "DELETE",
+    });
+    await get().cargarCtem();
+    toast({ title: "Programa continuo detenido", description: "El historial de corridas se conserva." });
   },
 
   async cargarOrganizaciones() {
