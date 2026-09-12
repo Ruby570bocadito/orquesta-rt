@@ -50,9 +50,12 @@ def _leer_caso(db_path: Path) -> dict[str, Any] | None:
     except sqlite3.Error:
         return None
     try:
+        # z3 (sesión 5): el tenant viaja en la fila para poder aplicar el
+        # aislamiento multi-tenant en la AGREGACIÓN (la API filtra por la
+        # organización del peticionario; admin ve todas).
         eng = conn.execute(
-            "SELECT id, nombre, cliente, fase_actual, estado_fase, creado_en "
-            "FROM engagements WHERE id=?", (db_path.stem,)).fetchone()
+            "SELECT id, nombre, cliente, fase_actual, estado_fase, creado_en, "
+            "tenant_id FROM engagements WHERE id=?", (db_path.stem,)).fetchone()
         if eng is None:
             return None
 
@@ -93,6 +96,7 @@ def _leer_caso(db_path: Path) -> dict[str, Any] | None:
                 "cliente": eng["cliente"], "fase": eng["fase_actual"],
                 "estado_fase": eng["estado_fase"], "creado_en": eng["creado_en"],
             },
+            "tenant": str(eng["tenant_id"] or "predeterminada"),
             "observadas": observadas,
             "intentadas": intentadas,
             "deteccion": deteccion,
@@ -106,10 +110,20 @@ def _leer_caso(db_path: Path) -> dict[str, Any] | None:
         conn.close()
 
 
-def construir_cobertura(raiz_casos: Path) -> dict[str, Any]:
+def construir_cobertura(raiz_casos: Path,
+                        tenant_filtro: str | None = None) -> dict[str, Any]:
     """Agrega la cobertura ATT&CK de TODAS las campañas del despliegue.
 
     Solo lectura (SQLite mode=ro): la analítica nunca escribe en los casos.
+
+    z3 (auditoría sesión 5) — AISLAMIENTO MULTI-TENANT: la analítica antes
+    agregaba SIEMPRE todas las BDs y exponía nombre, cliente, fase y
+    resultados de detección de campañas de OTRAS organizaciones a cualquier
+    cuenta autenticada (incluso `lector` de otro tenant) — el mismo tipo de
+    fuga que la sesión 1 corrigió en aprobaciones (F3). Con `tenant_filtro`
+    (la organización del peticionario) solo entran en la agregación las
+    campañas de SU tenant; `None` (solo admin) mantiene la vista completa
+    del despliegue, que es el propósito legítimo de la analítica de programa.
     """
     generados = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     resultado: dict[str, Any] = {
@@ -150,6 +164,10 @@ def construir_cobertura(raiz_casos: Path) -> dict[str, Any]:
         if datos is None:
             resultado["errores"].append(
                 {"bd": bd.name, "motivo": "ilegible u huérfana: omitida"})
+            continue
+        # z3 (sesión 5): filtro de organización. La BD omitida NO se anota
+        # como error: no es un fallo de lectura, es un caso fuera del tenant.
+        if tenant_filtro is not None and datos.get("tenant") != tenant_filtro:
             continue
         cam = datos["campaña"]
         det = datos["deteccion"]

@@ -2999,25 +2999,37 @@ def webhooks_entregas(webhook_id: str, request: Request,
 
 
 @app.get("/api/analitica/cobertura-attack")
-def cobertura_attack() -> dict[str, Any]:
+def cobertura_attack(request: Request) -> dict[str, Any]:
     """Cobertura ATT&CK agregada entre campañas: matriz técnica × campaña,
     técnicas recurrentes y cobertura de detección por campaña (VECTR).
-    Solo técnicas con ID ATT&CK válido; solo lectura."""
+    Solo técnicas con ID ATT&CK válido; solo lectura.
+
+    z3 (auditoría sesión 5): aislamiento multi-tenant. La analítica vive
+    FUERA del árbol /api/engagements/{id} (el middleware no puede filtrarla
+    por caso) y antes devolvía campañas de TODAS las organizaciones con su
+    nombre y cliente — fuga cross-tenant a cualquier cuenta autenticada.
+    Ahora el no-admin solo agrega los casos de SU organización; admin ve el
+    despliegue completo (propósito de la analítica de programa)."""
     try:
         from . import cobertura_attack
     except ImportError:
         from orchestrator import cobertura_attack  # type: ignore
-    return cobertura_attack.construir_cobertura(RAIZ_CASOS)
+    filtro = None if es_admin(request) else tenant_de(request)
+    return cobertura_attack.construir_cobertura(RAIZ_CASOS, tenant_filtro=filtro)
 
 
 @app.get("/api/analitica/cobertura-attack.csv")
-def cobertura_attack_csv() -> Response:
-    """Matriz técnica × campaña en CSV (una fila por celda poblada)."""
+def cobertura_attack_csv(request: Request) -> Response:
+    """Matriz técnica × campaña en CSV (una fila por celda poblada).
+
+    z3 (sesión 5): mismo aislamiento multi-tenant que la versión JSON —
+    el CSV de un no-admin no incluye campañas de otras organizaciones."""
     try:
         from . import cobertura_attack
     except ImportError:
         from orchestrator import cobertura_attack  # type: ignore
-    cobertura = cobertura_attack.construir_cobertura(RAIZ_CASOS)
+    filtro = None if es_admin(request) else tenant_de(request)
+    cobertura = cobertura_attack.construir_cobertura(RAIZ_CASOS, tenant_filtro=filtro)
     contenido = cobertura_attack.csv_cobertura(cobertura)
     return Response(
         content=contenido, media_type="text/csv; charset=utf-8",

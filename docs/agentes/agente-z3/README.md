@@ -13,6 +13,7 @@
 > | 2 | 2026-09-12 | [`sesion-2-tls-sso-endurecimiento.md`](sesion-2-tls-sso-endurecimiento.md) | TLS seguro por defecto en 17 clientes, secuestro de cuentas SSO, `/api/salud` sin topología, STARTTLS verificado, guardia nmap, `.env.example` |
 > | 3 | 2026-09-12 | [`sesion-3-v24-tercera-ronda.md`](sesion-3-v24-tercera-ronda.md) | Código v24 (MISP lab + Sigma), módulos de razonamiento/CTEM, rutas no-engagement, informe markdown, endurecimiento de puertos Docker |
 > | 4 | 2026-09-12 | [`sesion-4-mcp-superficie-y-endurecimiento.md`](sesion-4-mcp-superficie-y-endurecimiento.md) | Servidores MCP (SSRF osint, saneado LLM01, TLS fail-open, paquete inarrancable), superficie OpenAPI + path-traversal del proxy, revisión de núcleo/infra restante |
+> | 5 | 2026-09-12 | [`sesion-5-analitica-tenant-y-higiene-repo.md`](sesion-5-analitica-tenant-y-higiene-repo.md) | api.py completo (middleware/RBAC/admin/SSO/SSE), analítica cross-tenant (F31), material sensible en git: usuarios.db con secreto JWT (F32), cabeceras SMTP (F33), revisión de rutas.py/ldap/sso/copiloto/infra |
 
 ## Metodología
 
@@ -74,3 +75,6 @@
 | F28 | MEDIO | 4 | Remediado (saneado LLM01 unificado en los MCP) |
 | F29 | BAJO | 4 | Remediado (TLS fail-open eliminado + guardia AST) |
 | F30 | MEDIO | 4 | Remediado (paquete servidores_mcp: la capa MCP ya arranca) |
+| F31 | MEDIO | 5 | Remediado (aislamiento tenant en analítica ATT&CK JSON+CSV) |
+| F32 | ALTO | 5 | Remediado (usuarios.db y casos/*.db fuera del índice de git; pendiente purga de historial) |
+| F33 | BAJO | 5 | Remediado (validación de destinatarios/asunto en envío SMTP) |

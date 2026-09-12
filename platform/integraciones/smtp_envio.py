@@ -24,7 +24,19 @@ phishing del equipo; esta plataforma no fabrica cifras.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+
+# z3 (auditoría sesión 5, F33): dirección email EXIGIBLE. La cabecera "To"
+# se construye con ", ".join(destinatarios): una entrada con CRLF (o con
+# estructura de cabecera tipo "a@b.com, Bcc: victima@x") no debe llegar
+# JAMÁS a EmailMessage. Python moderno neutraliza parte del riesgo al
+# serializar, pero la política aquí es defense-in-depth explícita: el ROE
+# acota los destinatarios y la API solo debe aceptar direcciones válidas.
+_RE_DIRECCION = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"       # local-part rfc5322 (práctico)
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"  # label del dominio
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")  # + tld
 
 
 def _config() -> dict[str, Any]:
@@ -42,18 +54,53 @@ def _config() -> dict[str, Any]:
             "tls": os.environ.get("SMTP_TLS", "1") == "1"}
 
 
+def _validar_destinatarios(destinatarios: list[str]) -> tuple[list[str], list[str]]:
+    """z3 (sesión 5, F33): separa direcciones válidas de inválidas.
+
+    Rechaza: vacías, con CRLF/ángulos/comas (inyección de cabecera o
+    lista embebida) y sin formato email verificable. Devuelve
+    (validas, invalidas) para poder informar sin enviar NADA si hay
+    alguna inválida: una campaña de phishing autorizada no admite
+    "envía los buenos y descarta los malos en silencio".
+    """
+    validas: list[str] = []
+    invalidas: list[str] = []
+    for d in destinatarios:
+        limpio = (d or "").strip()
+        if not limpio or _RE_DIRECCION.fullmatch(limpio) is None:
+            invalidas.append((d or "")[:80])
+            continue
+        validas.append(limpio)
+    return validas, invalidas
+
+
+def _asunto_seguro(asunto: str | None) -> str:
+    """z3 (sesión 5, F33): el asunto viaja en UNA cabecera — CR/LF fuera
+    (colapsados a espacio) para que un asunto hostil no fabrique cabeceras."""
+    return " ".join(str(asunto or "").splitlines())
+
+
 def enviar(destinatarios: list[str], asunto: str, cuerpo: str,
            html: bool = True) -> dict[str, Any]:
     """Envío SMTP real a los destinatarios autorizados en la aprobación."""
     if not destinatarios:
         return {"enviado": False, "error": "lista de destinatarios vacía"}
+    # z3 (sesión 5, F33): validación ANTES de cualquier I/O — sin lista
+    # válida íntegra no hay conexión SMTP ni envío parcial.
+    validas, invalidas = _validar_destinatarios(destinatarios)
+    if invalidas:
+        return {"enviado": False,
+                "error": ("destinatarios inválidos (se exige dirección email "
+                          f"válida, sin cabeceras embebidas): {invalidas[:3]}")}
+    # El asunto viaja en una cabecera: CR/LF fuera (falsos encabezados).
+    asunto = _asunto_seguro(asunto)
     try:
         import smtplib
         from email.message import EmailMessage
         cfg = _config()
         mensaje = EmailMessage()
         mensaje["From"] = cfg["remitente"]
-        mensaje["To"] = ", ".join(destinatarios)
+        mensaje["To"] = ", ".join(validas)
         mensaje["Subject"] = asunto
         if html:
             mensaje.set_content("Active HTML para ver esta campaña.")
@@ -74,7 +121,7 @@ def enviar(destinatarios: list[str], asunto: str, cuerpo: str,
                 smtp.starttls(context=ctx)
             smtp.login(cfg["usuario"], cfg["clave"])
             rechazados = smtp.send_message(mensaje)
-        return {"enviado": True, "total": len(destinatarios),
+        return {"enviado": True, "total": len(validas),
                 "remitente": cfg["remitente"],
                 "rechazados": list(rechazados or {}),
                 "nota": "entrega gestionada por el servidor SMTP del equipo; "
