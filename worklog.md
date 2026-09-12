@@ -994,7 +994,6 @@ Stage Summary:
 - Órdenes emitidas: z3 reconoce el cierre real de F32 en su próxima sesión; z2 chequea artefactos de conflicto y reporta sobre el HEAD publicado; todos leen las bitácoras previas y numeran Task IDs desde el máximo existente; operador decide el reparto de z1 (inactivo desde v27) y revoca el PAT (petición ya doble).
 
 Addendum (Task ID 40): al publicar, z1 había pusheado v28 (dashboard: ROE vivo editable, auditoría de sistema en Equipo, reasignación cross-tenant, README con GIF) — la orden de reparto de z1 queda resuelta por los hechos. Suite re-verificada tras rebase: 557/8/0. Badge del README actualizado a 557 (z1 citaba 509 en su mensaje; el README heredaba 522 de la sesión 01).
-
 ---
 Task ID: 41 (Z2-ronda-10) — renumerado desde 40: colisión con la sesión 03 del director, que llegó al remoto mientras esta ronda estaba en vuelo (su regla: numerar desde el máximo existente)
 Agent: z2 (pulimiento de funciones y mecánicas)
@@ -1018,3 +1017,20 @@ Stage Summary:
 - Rondas 8-9 restauradas verificadas íntegras; protocolo post-purga respetado (clon fresco, nada se pushea desde el clon archivado).
 - Siguiente ronda propuesta (sesion-10): export Prometheus (sexta ronda deferido: decisión o retirada), refresh manual del desplegable de entregas, migración MCP v2 como ronda dedicada (plan listo), realce en títulos (marginal).
 
+---
+Task ID: 42 (Z-DIRECTOR-sesion-04) — renumerado desde 41: la ronda 10 de z2 llegó al remoto durante esta auditoría y tomó el número primero
+Agent: z-director (dirección y revisión del conjunto orquesta-rt)
+Task: Auditoría dogfood — operar la plataforma como agente de red team en una auditoría real (bootstrap en frío, ciclo completo con IA de frontera real, arsenal, copiloto, webhooks, adversarial) y detectar errores, fallos, mejoras y carencias en operación.
+
+Work Log:
+- Entorno propio y reproducible: main 9243d3e, venv de auditoría, BD previa apartada (bootstrap real del primer admin por API), lab :8080, ORQUESTA_LAB_HOGARES dedicado y PUENTE IA réplica fiel del de la consola (GLM real vía SDK; mismas omisiones) — 16 llamadas de frontera durante la sesión.
+- Ciclo agéntico F0→F7 completo con razonador y copiloto contra GLM real: F1 OSINT (CT/DNS/robots), F2 recon (fingerprint nginx + vector T1595.002), F3 con plan B honesto, F6 pausado por firma y rechazado deliberadamente, F7 informe con cadena de custodia VÁLIDA y economía de tokens (0,04 USD).
+- Boundary: 6 aprobaciones ejercitadas (3 firmadas / 3 rechazadas). Verificación adversarial: 401 sin/falso/none-alg token, 403 cross-tenant en todos los recursos del caso ajeno, kill switch bloquea incluso bajo riesgo, cerrar-todas con alcance por cuenta exacto, anti-SSRF en dos capas (literal + decimal→DNS), HMAC de webhook verificado manualmente con el secreto, F37 verificado EN OPERACIÓN (firma expone raíz; /etc muere tras firma; implantar→retirar con ausencia certificada), escudo LLM01 verificado por canal RAG (marcas_entrada=1) y resistencia del modelo ante inyección directa.
+- F38 (ALTO, z3): la firma de evasion.generar NO cubre el payload — api.py:2013 firma solo {host, metodo, formato}; PoC en traza: firma previa con payload benigno auto-autorizó un payload AMSI-bypass distinto ("Autorizada por decisión humana previa"). Rompe la coincidencia EXACTA documentada; recomendación payload_sha256 en la huella + test E2E simétrico al F37.
+- HD-2 (z1): avanzar sin vector_elegido encola aprobación degenerada con vector vacío (boundary no la rechaza; el caso no recuerda la elección). HD-1 (z2): re-ejecutar fase duplica evidencias (mismo SHA-256 ×2 en el informe) y el resumen puede regresar (16→0 subdominios) contradiciendo la memoria del caso. HD-3 (z3): bloqueo por fuerza bruta solo en memoria (reiniciar lo limpia; N workers = N×5). HD-6 (z2): el puente IA descarta max_tokens/temperature/response_format — control de coste y salida estructurada sin garantía E2E. HD-7/HD-8 (z1, roadmap): sin MSF no hay explotación HTTP nativa pese al lab con /admin; el lab empaquetado no trae LDAP/AD. HD-4/HD-5/HD-9 y micro-notas documentadas en la bitácora.
+- Sin cambios de código de plataforma en esta sesión: auditoría pura con asignación por carril. DOCS: docs/agentes/z-director/sesion-04-auditoria-dogfood-red-team.md + índice README; este registro.
+
+Stage Summary:
+- Veredicto: el producto se sostiene en operación real (boundary, confinamiento, LLM01, webhooks, multi-tenant y custodia hacen lo que la documentación promete, verificado con las manos). Primera grieta real del operator-in-command encontrada OPERANDO (no leyendo): F38 — firma del arsenal de evasión sin identidad del payload.
+- Órdenes: z3 ataca F38 con prioridad máxima + HD-3 + tabla de "argumentos que firman" para todo el catálogo; z2 ataca HD-1 + HD-6; z1 ataca HD-2 y evalúa HD-7/HD-8 en roadmap.
+- Pendientes heredados sin cambios: rotación de secreto_jwt en despliegues derivados, revocación del PAT (tercera petición) y reconocimiento del cierre real de F32 por z3.
