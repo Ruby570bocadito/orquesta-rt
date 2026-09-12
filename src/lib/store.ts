@@ -337,6 +337,9 @@ export interface ReceptorWebhook {
   fallos_24h?: number;
 }
 export interface EntregaWebhook {
+  // z2-ronda-9: identificador de la fila — el asidero del reenvío manual
+  // (antes el historial ni identificaba sus filas).
+  id: number;
   webhook_id: string;
   evento: string;
   engagement_id: string;
@@ -345,6 +348,11 @@ export interface EntregaWebhook {
   error: string | null;
   intentos: number;
   creado_en: string;
+  // z2-ronda-9: reenvío manual — `reenvio_de` (id de la entrega ORIGINAL
+  // cuando esta fila es un reenvío) y `reenviable` (fallo real con carga
+  // registrada: el único caso con botón Reenviar).
+  reenvio_de?: number | null;
+  reenviable?: boolean;
 }
 
 export interface ReflexionFase {
@@ -585,6 +593,9 @@ interface EstadoConsola {
   eliminarWebhook(id: string): Promise<void>;
   probarWebhook(id: string): Promise<{ enviado: boolean; http: number | null; error: string | null }>;
   cargarEntregasWebhook(id: string): Promise<EntregaWebhook[]>;
+  // z2-ronda-9: reenvío manual de una entrega fallida (misma carga,
+  // configuración actual del receptor; el backend exige fallo real).
+  reenviarEntregaWebhook(id: string, entregaId: number): Promise<{ enviado: boolean; http: number | null; error: string | null }>;
   // equipo (admin)
   cargarOperadores(): Promise<void>;
   crearOperadorCuenta(usuario: string, contrasena: string, rol: string, tenant_id?: string): Promise<void>;
@@ -1562,6 +1573,14 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
 
   async cargarEntregasWebhook(id: string) {
     return api<EntregaWebhook[]>(`/admin/webhooks/${id}/entregas?limite=20`);
+  },
+
+  // z2-ronda-9: reenvío manual de una entrega fallida (POST sincrónico;
+  // el backend valida que sea fallo real con carga y responde 400/404
+  // con la razón honesta cuando no lo sea).
+  async reenviarEntregaWebhook(id: string, entregaId: number) {
+    return api<{ enviado: boolean; http: number | null; error: string | null }>(
+      `/admin/webhooks/${id}/entregas/${entregaId}/reenviar`, { method: "POST" });
   },
 
   async cargarPrioridades() {

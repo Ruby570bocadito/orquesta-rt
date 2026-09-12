@@ -40,8 +40,17 @@ const ETIQUETA_EVENTO: Record<string, string> = {
  *  el canal heredado WEBHOOK_URL.
  *  z2-ronda-5: los pings de prueba (webhook.prueba, engagement "prueba")
  *  llevan firma visual propia — antes una fila de ping se veía IGUAL que
- *  una entrega operativa real y el historial confundía al diagnosticar. */
-function BloqueEntregas({ id, entregas }: { id: string; entregas: Record<string, EntregaWebhook[]> }) {
+ *  una entrega operativa real y el historial confundía al diagnosticar.
+ *  z2-ronda-9: las filas fallidas REALES con carga registrada ofrecen el
+ *  reenvío manual (botón Reenviar) y los reenvíos llevan su chip —
+ *  el operador distingue de un vistazo la fila original de sus reenvíos. */
+function BloqueEntregas({ id, entregas, onReenviar, reenviando, errorReenvio }: {
+  id: string;
+  entregas: Record<string, EntregaWebhook[]>;
+  onReenviar?: (id: string, e: EntregaWebhook) => void;
+  reenviando?: number | null;
+  errorReenvio?: Record<number, string>;
+}) {
   return (
     <div className="mt-2 rounded-md border border-line bg-ink p-2">
       {(entregas[id] ?? []).length === 0 ? (
@@ -63,9 +72,29 @@ function BloqueEntregas({ id, entregas }: { id: string; entregas: Record<string,
                 {esPrueba
                   ? <span className="rounded-full border border-slate-500/40 bg-slate-500/10 px-1.5 py-px text-slate-300">ping de prueba</span>
                   : <span className="text-zinc-400">{ETIQUETA_EVENTO[e.evento] ?? e.evento}</span>}
+                {e.reenvio_de != null && (
+                  <span className="rounded-full border border-teal-500/40 bg-teal-500/10 px-1.5 py-px text-teal-300">
+                    reenvío de #{e.reenvio_de}
+                  </span>
+                )}
                 <span className="text-zinc-600">{e.engagement_id}</span>
                 {e.intentos > 1 && <span className="text-amber-300">{e.intentos} intentos</span>}
                 {e.error && <span className="text-red-300/80">{e.error.slice(0, 90)}</span>}
+                {onReenviar && e.reenviable && (
+                  <button
+                    type="button"
+                    disabled={reenviando === e.id}
+                    onClick={() => onReenviar(id, e)}
+                    className="rounded border border-line bg-panel px-1.5 py-px text-[10px] text-zinc-300 transition-colors hover:bg-raised hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {reenviando === e.id ? "reenviando…" : "Reenviar"}
+                  </button>
+                )}
+                {errorReenvio?.[e.id] && (
+                  <span className="text-red-300/80" title={errorReenvio[e.id]}>
+                    {errorReenvio[e.id].slice(0, 80)}
+                  </span>
+                )}
                 <span className="ml-auto text-zinc-600">{new Date(e.creado_en).toLocaleString("es-ES")}</span>
               </li>
             );
@@ -87,6 +116,7 @@ export function SeccionWebhooks() {
   const actualizarWebhook = usarConsola((s) => s.actualizarWebhook);
   const eliminarWebhook = usarConsola((s) => s.eliminarWebhook);
   const probarWebhook = usarConsola((s) => s.probarWebhook);
+  const reenviarEntregaWebhook = usarConsola((s) => s.reenviarEntregaWebhook);
   const cargarEntregasWebhook = usarConsola((s) => s.cargarEntregasWebhook);
 
   const [abierto, setAbierto] = useState(false);
@@ -102,6 +132,9 @@ export function SeccionWebhooks() {
   const [entregasDe, setEntregasDe] = useState<string | null>(null);
   const [entregas, setEntregas] = useState<Record<string, EntregaWebhook[]>>({});
   const [porEliminar, setPorEliminar] = useState<string | null>(null);
+  // z2-ronda-9: reenvío manual — fila en curso y errores honestos por fila.
+  const [reenviando, setReenviando] = useState<number | null>(null);
+  const [errorReenvio, setErrorReenvio] = useState<Record<number, string>>({});
 
   const esAdmin = sesion?.rol === "admin";
 
@@ -187,6 +220,28 @@ export function SeccionWebhooks() {
       setEntregas((m) => ({ ...m, [id]: lista }));
     } catch {
       setEntregas((m) => ({ ...m, [id]: [] }));
+    }
+  };
+
+  // z2-ronda-9: reenvío manual de una entrega fallida — nueva entrega real
+  // con la misma carga; el historial se refresca si está abierto (mismo
+  // patrón que el ping de la ronda 6) y el error del backend (400/404) se
+  // pinta junto a la fila, nunca en silencio.
+  const reenviar = async (id: string, e: EntregaWebhook) => {
+    setReenviando(e.id);
+    setErrorReenvio((m) => ({ ...m, [e.id]: "" }));
+    try {
+      await reenviarEntregaWebhook(id, e.id);
+      if (entregasDe === id) {
+        try {
+          const lista = await cargarEntregasWebhook(id);
+          setEntregas((m) => ({ ...m, [id]: lista }));
+        } catch { /* el desplegable ya pinta su propio estado vacío */ }
+      }
+    } catch (err) {
+      setErrorReenvio((m) => ({ ...m, [e.id]: (err as Error).message }));
+    } finally {
+      setReenviando(null);
     }
   };
 
@@ -338,7 +393,8 @@ export function SeccionWebhooks() {
                   </p>
                 )}
                 {entregasDe === w.id && (
-                  <BloqueEntregas id={w.id} entregas={entregas} />
+                  <BloqueEntregas id={w.id} entregas={entregas}
+                    onReenviar={reenviar} reenviando={reenviando} errorReenvio={errorReenvio} />
                 )}
               </li>
             );
@@ -375,7 +431,8 @@ export function SeccionWebhooks() {
                 Entregas
               </Button>
             </div>
-            {entregasDe === "entorno" && <BloqueEntregas id="entorno" entregas={entregas} />}
+            {entregasDe === "entorno" && <BloqueEntregas id="entorno" entregas={entregas}
+              onReenviar={reenviar} reenviando={reenviando} errorReenvio={errorReenvio} />}
           </li>
         </ul>
       )}

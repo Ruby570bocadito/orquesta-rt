@@ -938,3 +938,25 @@ Stage Summary:
 - 531 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
 - El operador ve el término buscado realzado dentro del fragmento — lo que BM25 puntuó es exactamente lo que se marca, tildes incluidas.
 - Siguiente ronda propuesta (sesion-07): export Prometheus (quinta ronda deferido: decisión o retirada), reenvío manual de entregas fallidas (esquema de cargas), salud derivada por receptor, realce en títulos (marginal).
+
+---
+Task ID: 36 (Z2-ronda-9)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 9 de pulimiento — reenvío manual de entregas webhook fallidas (la propuesta más veterana de la cola, esperando desde la sesión 05 porque "exigía esquema nuevo").
+
+Work Log:
+- Base: main f3ef61e (ronda 8 publicada). Línea base verificada: 535 passed / 9 skipped.
+- DECISIÓN DE DISEÑO: la carga original viaja en la PROPIA fila de entrega (columnas carga TEXT + reenvio_de INTEGER, migración idempotente PRAGMA table_info como auth.py/memory.py) — la retención ya está acotada por las podas de rondas 5/6; tabla aparte = dos fuentes de verdad que podan a ritmos distintos (descartada); re-derivar la carga del estado actual del caso = el reenvío mentiría sobre el evento original (descartado).
+- BB1 (webhook.py): _registrar_entrega/_entregar persisten la carga JSON de cada entrega (real y ping).
+- BB2 (webhook.py + api.py): reenviar_entrega(webhook_id, entrega_id) — nueva entrega REAL (uuid, ts, firma nuevos) con la MISMA carga y la configuración ACTUAL del receptor (rotación de url/secreto = caso de uso); veto SSRF por resolución incluido; ruta POST /api/admin/webhooks/{id}/entregas/{entrega_id}/reenviar con el guard _admin_webhooks.
+- BB3: el historial (entregas_de) ahora expone id (no identificaba sus filas), reenvio_de y reenviable; la carga NO viaja por la API (datos del caso).
+- BB4 (webhooks.tsx + store.ts): botón Reenviar en fallos reenviables (BD y canal heredado), chip "reenvío de #N" teal, error del backend pintado junto a la fila, historial refrescado tras el reenvío (patrón ping ronda 6).
+- HONESTIDAD (5 negaciones con test): solo fallos (recibida → 400 "ya llegó"), pings no reenviables (se relanzan con Probar), filas legadas sin carga declaradas NO reenviables, receptor debe existir/activo/suscrito (404/400), re-reenvío apunta a la ORIGINAL (forma de estrella, no cadena); el reenvío cuenta como entrega real en podas y métricas 24h.
+- Hallazgo colateral: primer SELECT de entregas_de olvidaba la columna id — cazado por los tests (13 fallos) antes de salir del entorno.
+- TESTS (+13, test_v33_z2.py): migración legado sin pérdida, reenvío feliz (misma carga, cabeceras contractuales ronda 4 intactas, original intacta), estrella de re-reenvíos, 5 negaciones, 404s, exposición del historial, métricas 24h, E2E API 200/400/404. 548 passed / 9 skipped, tsc 0, eslint 0.
+- DOCS: docs/agentes/z2/sesion-08-ronda-9.md + índice del README de la carpeta + z2.md (punta de rastro) actualizados; este registro.
+
+Stage Summary:
+- 548 passed / 9 skipped (0 fallos), tsc 0, eslint 0.
+- Un evento webhook perdido YA NO se pierde: el operador lo reenvía con la carga fiel y ve el resultado en el historial — la propuesta en cola desde la sesión 05 queda cerrada.
+- Siguiente ronda propuesta (sesion-08): export Prometheus (quinta ronda deferido: decisión o retirada), salud derivada por receptor, reenvío en lote (deferido sin fecha), realce en títulos (marginal).

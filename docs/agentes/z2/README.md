@@ -34,6 +34,7 @@ nunca se borra ni se edita el .md de otro agente).
 | 05 | [sesion-05-ronda-6.md](sesion-05-ronda-6.md) | 6 | Métricas de 24 h por receptor visibles en la tarjeta (el receptor muerto se ve sin abrir el desplegable), cuota PROPIA para los pings de prueba (no desplazan entregas reales) y refresco del historial tras un ping. Rotación con doble ventana: investigada y deferida con razón técnica. |
 | 06 | [sesion-06-ronda-7.md](sesion-06-ronda-7.md) | 7 | Búsqueda: el fragmento ya localiza la coincidencia que BM25 puntuó (misma tolerancia a tildes que el índice, gemelo normalizado 1:1) — antes una consulta acentuada mostraba la cabecera del documento en vez del pasaje relevante. |
 | 07 | [sesion-07-ronda-8.md](sesion-07-ronda-8.md) | 8 | Búsqueda: el término buscado se REALZA sobre el fragmento — el backend entrega las posiciones exactas (`coincidencias`, mismo gemelo 1:1 de la ronda 7) y la vista Memoria pinta `<mark>`; contrato backend↔frontend a prueba de deriva, suspensivo incluido. |
+| 08 | [sesion-08-ronda-9.md](sesion-08-ronda-9.md) | 9 | Reenvío manual de entregas webhook fallidas: la carga original viaja en la propia fila (migración idempotente), `POST …/entregas/{id}/reenviar` dispara una entrega real nueva con la config ACTUAL del receptor, el historial expone id/reenviable/reenvio_de y la UI suma botón + chip; cinco negaciones honestas con test. |
 
 ## Convenciones
 

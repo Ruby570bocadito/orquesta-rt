@@ -159,11 +159,22 @@ def _conexion() -> sqlite3.Connection:
             http INTEGER,
             error TEXT,
             intentos INTEGER NOT NULL DEFAULT 1,
-            creado_en TEXT NOT NULL
+            creado_en TEXT NOT NULL,
+            carga TEXT,
+            reenvio_de INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_webhook_entregas_wh
             ON webhook_entregas(webhook_id, id DESC);
     """)
+    # z2 (ronda 9): reenvío manual de entregas fallidas — migración
+    # idempotente guiada por table_info (mismo patrón que auth.py y
+    # memory.py): las BDs de despliegues anteriores a la ronda ganan las
+    # columnas sin perder datos; las nuevas ya nacen con ellas.
+    columnas = {f[1] for f in conn.execute("PRAGMA table_info(webhook_entregas)")}
+    if "carga" not in columnas:
+        conn.execute("ALTER TABLE webhook_entregas ADD COLUMN carga TEXT")
+    if "reenvio_de" not in columnas:
+        conn.execute("ALTER TABLE webhook_entregas ADD COLUMN reenvio_de INTEGER")
     conn.commit()
     return conn
 
@@ -371,7 +382,8 @@ def _post(url: str, cuerpo: bytes, cabeceras_extra: dict[str, str]) -> dict[str,
 
 
 def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
-              engagement_id: str, carga: dict[str, Any]) -> dict[str, Any]:
+              engagement_id: str, carga: dict[str, Any],
+              reenvio_de: int | None = None) -> dict[str, Any]:
     """Entrega con UN reintento (t+2 s) ante 5xx o error de red. Cada intento
     usa un cuerpo NUEVO (ts distinto) y por tanto firma nueva.
 
@@ -379,6 +391,11 @@ def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
     alta pudo ser hace días y el DNS puede haber cambiado (rebinding), y
     el canal heredado WEBHOOK_URL nunca pasó por validar_url. Un receptor
     vetado no consume ni un intento y queda registrado en el historial.
+
+    z2 (ronda 9): `reenvio_de` marca la entrega como REENVÍO manual de otra
+    (id de la fila original); NULL = entrega operativa normal. El reenvío
+    recorre el MISMO camino (veto SSRF incluido) y se registra con su
+    propia fila — nueva entrega, nueva firma, nuevo uuid.
     """
     entrega = uuid.uuid4().hex
     intentos = 0
@@ -388,7 +405,7 @@ def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
     except ValueError as exc:
         error = str(exc)[:200]
         _registrar_entrega(webhook_id, evento, engagement_id,
-                           False, None, error, 0)
+                           False, None, error, 0, carga, reenvio_de)
         return {"ok": False, "http": None, "error": error}
     for intento in (1, 2):
         intentos = intento
@@ -418,20 +435,28 @@ def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
             time.sleep(2.0)  # solo si queda un intento: no dormir en balde
     _registrar_entrega(webhook_id, evento, engagement_id,
                        resultado["ok"], resultado["http"],
-                       resultado["error"], intentos)
+                       resultado["error"], intentos, carga, reenvio_de)
     return resultado
 
 
 def _registrar_entrega(webhook_id: str, evento: str, engagement_id: str,
                        ok: bool, http: int | None, error: str | None,
-                       intentos: int) -> None:
+                       intentos: int, carga: dict[str, Any] | None = None,
+                       reenvio_de: int | None = None) -> None:
     try:
         with _conexion() as conn:
+            # z2 (ronda 9): la CARGA ORIGINAL viaja en la propia fila — es lo
+            # que permite reenviar una entrega fallida sin tabla nueva. Mismo
+            # registro, mismas podas (la retención ya está acotada por
+            # receptor y global): la carga no alarga ninguna ventana.
             conn.execute(
                 "INSERT INTO webhook_entregas (webhook_id, evento, engagement_id,"
-                " ok, http, error, intentos, creado_en) VALUES (?,?,?,?,?,?,?,?)",
+                " ok, http, error, intentos, creado_en, carga, reenvio_de)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (webhook_id, evento, engagement_id, 1 if ok else 0, http,
-                 error, intentos, datetime.now(timezone.utc).isoformat()))
+                 error, intentos, datetime.now(timezone.utc).isoformat(),
+                 json.dumps(carga, ensure_ascii=False) if carga is not None else None,
+                 reenvio_de))
             # Poda por RECEPTOR (z2, ronda 5) en dos cuotas separadas
             # (z2, ronda 6): las entregas REALES conservan las últimas
             # MAX_ENTREGAS_RECEPTOR y los pings de prueba la suya
@@ -507,14 +532,94 @@ def despachar_en_segundo_plano(evento: str, engagement_id: str,
 
 
 def entregas_de(webhook_id: str, limite: int = 20) -> list[dict[str, Any]]:
-    """Últimas entregas del receptor (más reciente primero), acotadas [1, 100]."""
+    """Últimas entregas del receptor (más reciente primero), acotadas [1, 100].
+
+    z2 (ronda 9): expone `id` (el asidero del reenvío manual — hasta ahora
+    el historial ni identificaba sus filas), `reenvio_de` (id de la entrega
+    original cuando la fila es un reenvío) y `reenviable` (fallo real con
+    carga registrada — el botón Reenviar solo tiene sentido ahí). La CARGA
+    en sí NO sale por la API: puede contener datos del caso y el historial
+    necesita el resultado HTTP, no repetir el payload.
+    """
     acotado = min(max(limite, 1), 100)
     with _conexion() as conn:
         filas = conn.execute(
-            "SELECT webhook_id, evento, engagement_id, ok, http, error, intentos,"
-            " creado_en FROM webhook_entregas WHERE webhook_id=?"
+            "SELECT id, webhook_id, evento, engagement_id, ok, http, error,"
+            " intentos, creado_en, reenvio_de, carga FROM webhook_entregas"
+            " WHERE webhook_id=?"
             " ORDER BY id DESC LIMIT ?", (webhook_id, acotado)).fetchall()
-    return [dict(f) | {"ok": bool(f["ok"])} for f in filas]
+    salida = []
+    for f in filas:
+        reenviable = (not f["ok"] and f["evento"] != "webhook.prueba"
+                      and f["carga"] is not None)
+        salida.append(dict(f) | {"ok": bool(f["ok"]),
+                                 "reenvio_de": f["reenvio_de"],
+                                 "reenviable": reenviable,
+                                 "carga": None})  # la carga no viaja (ver docstring)
+    return salida
+
+
+def reenviar_entrega(webhook_id: str, entrega_id: int) -> dict[str, Any]:
+    """z2 (ronda 9): reenvío MANUAL de una entrega fallida.
+
+    Nueva entrega REAL — uuid, marca temporal y firma nuevos — con la
+    MISMA carga del evento original y la configuración ACTUAL del receptor
+    (rotar URL/secreto tras arreglar el receptor es justo el caso de uso).
+    Recorre el mismo camino que cualquier entrega: veto SSRF incluido.
+
+    Honestidad ante todo:
+    · Solo entregas FALLIDAS (reenviar una recibida duplicaría el evento
+      en el receptor y su SIEM).
+    · Los pings de prueba no se reenvían (se vuelven a lanzar con Probar).
+    · Una fila anterior a la ronda 9 (sin carga registrada) se declara NO
+      reenviable en lugar de inventarse un contenido.
+    · El receptor debe existir, estar activo y seguir suscrito al evento.
+    · El reenvío se registra como fila propia (reenvio_de → la ORIGINAL:
+      re-reenviar un reenvío fallido apunta a la misma raíz, forma de
+      estrella, no cadena) y entra en las mismas podas y métricas 24 h
+      que cualquier entrega real.
+    """
+    with _conexion() as conn:
+        f = conn.execute(
+            "SELECT id, evento, engagement_id, ok, carga, reenvio_de"
+            " FROM webhook_entregas WHERE id=? AND webhook_id=?",
+            (entrega_id, webhook_id)).fetchone()
+    if f is None:
+        raise LookupError(
+            f"entrega {entrega_id} no existe para el receptor {webhook_id}")
+    if f["ok"]:
+        raise ValueError(
+            "la entrega ya llegó al receptor: reenviarla duplicaría el evento")
+    if f["evento"] == "webhook.prueba":
+        raise ValueError(
+            "un ping de prueba no se reenvía: vuelve a lanzarlo con Probar")
+    if not f["carga"]:
+        raise ValueError(
+            "entrega sin carga registrada (anterior a la ronda 9): no reenviable")
+
+    if webhook_id == "entorno":
+        if not canal_heredado_estado()["activo"]:
+            raise LookupError("canal heredado WEBHOOK_URL no configurado")
+        url = os.environ.get("WEBHOOK_URL", "").strip()
+        secreto = os.environ.get("WEBHOOK_SECRETO", "")
+    else:
+        with _conexion() as conn:
+            w = conn.execute(
+                "SELECT url, secreto, activo, eventos FROM webhooks WHERE id=?",
+                (webhook_id,)).fetchone()
+        if w is None:
+            raise LookupError(f"webhook {webhook_id} no existe")
+        if not w["activo"]:
+            raise ValueError("el receptor está desactivado: actívalo antes de reenviar")
+        if f["evento"] not in json.loads(w["eventos"]):
+            raise ValueError(
+                f"el receptor ya no está suscrito a {f['evento']}")
+        url, secreto = w["url"], w["secreto"]
+
+    raiz = f["reenvio_de"] or f["id"]
+    r = _entregar(webhook_id, url, secreto, f["evento"], f["engagement_id"],
+                  json.loads(f["carga"]), reenvio_de=raiz)
+    return {"enviado": r["ok"], "http": r["http"], "error": r["error"]}
 
 
 def entregas_24h_por_receptor() -> dict[str, dict[str, int]]:

@@ -3003,6 +3003,27 @@ def webhooks_entregas(webhook_id: str, request: Request,
     return wh.entregas_de(webhook_id, limite)
 
 
+@app.post("/api/admin/webhooks/{webhook_id}/entregas/{entrega_id}/reenviar")
+def webhooks_reenvio(webhook_id: str, entrega_id: int,
+                     request: Request) -> dict[str, Any]:
+    """z2 (ronda 9): reenvío MANUAL de una entrega fallida — nueva entrega
+    real (uuid y firma nuevos) con la MISMA carga y la configuración ACTUAL
+    del receptor; el resultado se registra como fila propia marcada con
+    `reenvio_de`. Solo fallos reales con carga registrada: reenviar una
+    entrega recibida duplicaría el evento, y las filas anteriores a la
+    ronda 9 (sin carga) se declaran no reenviables en vez de inventarse."""
+    _admin_webhooks(request)
+    wh = _modulo_webhook()
+    if webhook_id == "entorno" and not wh.canal_heredado_estado()["activo"]:
+        raise HTTPException(404, "canal heredado WEBHOOK_URL no configurado")
+    try:
+        return wh.reenviar_entrega(webhook_id, entrega_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Analítica de cobertura ATT&CK entre campañas (v16): matriz técnica ×
 # campaña agregada de TODOS los casos del despliegue (solo lectura).
