@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, UserPlus, KeyRound, Trash2, ShieldCheck, Loader2, DatabaseBackup,
-  Building2, Fingerprint,
+  Building2, Fingerprint, ScrollText, RefreshCw,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Tarjeta, Insignia, TituloSeccion, Vacio } from "@/components/consola/ui";
@@ -52,6 +52,9 @@ export function VistaEquipo() {
   const organizaciones = usarConsola((s) => s.organizaciones);
   const cargarOrganizaciones = usarConsola((s) => s.cargarOrganizaciones);
   const crearOrganizacion = usarConsola((s) => s.crearOrganizacion);
+  const moverTenant = usarConsola((s) => s.moverTenant);
+  const auditoriaSistema = usarConsola((s) => s.auditoriaSistema);
+  const cargarAuditoriaSistema = usarConsola((s) => s.cargarAuditoriaSistema);
 
   const [dialogoAlta, setDialogoAlta] = useState(false);
   const [nuevoUsuario, setNuevoUsuario] = useState("");
@@ -64,6 +67,7 @@ export function VistaEquipo() {
   const [reseteo, setReseteo] = useState<{ usuario: string; clave: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [respaldando, setRespaldando] = useState(false);
+  const [cargandoAud, setCargandoAud] = useState(false);
 
   const esAdmin = sesion?.rol === "admin";
 
@@ -71,8 +75,9 @@ export function VistaEquipo() {
     if (esAdmin) {
       cargar().catch(() => undefined);
       cargarOrganizaciones().catch(() => undefined);
+      cargarAuditoriaSistema().catch(() => undefined);
     }
-  }, [esAdmin, cargar, cargarOrganizaciones]);
+  }, [esAdmin, cargar, cargarOrganizaciones, cargarAuditoriaSistema]);
 
   if (!esAdmin) {
     return (
@@ -205,6 +210,31 @@ export function VistaEquipo() {
       toast({ title: "Cuenta eliminada", description: usuario });
     } catch (e) {
       toast({ title: "No se pudo eliminar", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
+  // v28: mover cuenta de organización. En el propio admin está deshabilitado:
+  // asignar_tenant invalida las sesiones previas y le cerraría la suya.
+  const hacerMoverTenant = async (usuario: string, tenant: string) => {
+    try {
+      await moverTenant(usuario, tenant);
+      toast({
+        title: "Cuenta movida de organización",
+        description: `${usuario} → ${tenant} · sus sesiones previas quedaron revocadas`,
+      });
+    } catch (e) {
+      toast({ title: "No se pudo mover la cuenta", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
+  const recargarAuditoria = async () => {
+    setCargandoAud(true);
+    try {
+      await cargarAuditoriaSistema();
+    } catch {
+      toast({ title: "No se pudo cargar la auditoría", variant: "destructive" });
+    } finally {
+      setCargandoAud(false);
     }
   };
 
@@ -355,15 +385,13 @@ export function VistaEquipo() {
                         {op.rol}
                       </Chip>
                       <Chip tono="slate">
-                        <Building2 className="mr-1 h-3 w-3" />
-                        {op.tenant_id ?? "predeterminada"}
+                        {op.sso_sub ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Fingerprint className="mr-1 h-3 w-3" />
+                            SSO
+                          </span>
+                        ) : (op.tenant_id ?? "predeterminada")}
                       </Chip>
-                      {op.sso_sub ? (
-                        <Chip tono="esmeralda">
-                          <Fingerprint className="mr-1 h-3 w-3" />
-                          SSO
-                        </Chip>
-                      ) : null}
                       {op.usuario === sesion?.usuario && (
                         <span className="text-[11px] text-zinc-600">(tú)</span>
                       )}
@@ -386,6 +414,23 @@ export function VistaEquipo() {
                         <SelectItem value="gestor">gestor</SelectItem>
                         <SelectItem value="lector">lector</SelectItem>
                         <SelectItem value="admin">admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={op.tenant_id ?? "predeterminada"}
+                      onValueChange={(tenant) => hacerMoverTenant(op.usuario, tenant)}
+                      disabled={op.usuario === sesion?.usuario}
+                    >
+                      <SelectTrigger
+                        className="h-8 w-[150px] border-line bg-panel text-xs text-zinc-200"
+                        title="Organización de la cuenta (multi-tenant)">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border-line bg-raised text-zinc-100">
+                        {(organizaciones ?? [{ id: "predeterminada", nombre: "", creado_en: "", operadores: 0 }]).map((o) => (
+                          <SelectItem key={o.id} value={o.id}>{o.id}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
 
@@ -503,6 +548,46 @@ export function VistaEquipo() {
             <code className="ml-1 text-zinc-400">python -m orchestrator.cli respaldo-completo</code>.
           </p>
         </div>
+      </Tarjeta>
+
+      {/* v28: auditoría a nivel DESPLIEGUE (usuarios.db), distinta de la del caso */}
+      <Tarjeta className="p-0">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <TituloSeccion
+            titulo="Auditoría del sistema"
+            descripcion="Nivel despliegue: altas y bajas de cuentas, cambios de rol y organización, respaldos. Append-only en usuarios.db."
+          />
+          <Button variant="outline" size="sm"
+                  className="h-8 shrink-0 border-line text-zinc-300 hover:bg-panel hover:text-zinc-100"
+                  onClick={recargarAuditoria} disabled={cargandoAud}>
+            {cargandoAud
+              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            Actualizar
+          </Button>
+        </div>
+        {auditoriaSistema && auditoriaSistema.length > 0 ? (
+          <div className="max-h-80 divide-y divide-line overflow-y-auto">
+            {auditoriaSistema.map((ev) => (
+              <div key={ev.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 text-[13px] text-zinc-200">
+                    <ScrollText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                    <code className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">{ev.accion}</code>
+                    <span className="truncate text-xs text-zinc-500">{ev.detalle}</span>
+                  </p>
+                </div>
+                <div className="shrink-0 font-mono text-[10px] text-zinc-600">
+                  {ev.actor} · {fecha(ev.creado_en)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4">
+            <Vacio mensaje="Sin eventos de sistema todavía: se registrarán al gestionar cuentas, organizaciones y respaldos" />
+          </div>
+        )}
       </Tarjeta>
     </div>
   );

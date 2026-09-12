@@ -2,9 +2,11 @@
 
 /** Vista Panel: KPIs del engagement, feed de actividad y resumen del ROE. */
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Entrada, Tarjeta, Insignia, TituloSeccion, InsigniaSeveridad, barraRuido } from "@/components/consola/ui";
 import { usarConsola } from "@/lib/store";
+import { DialogoRoe } from "@/components/consola/dialogo-roe";
 import {
   ETIQUETA_FASE,
   ORDEN_FASES,
@@ -20,9 +22,11 @@ import {
   ShieldAlert,
   Ban,
   CheckCircle2,
+  PenLine,
   TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const TONO_ACTIVIDAD: Record<string, string> = {
   normal: "border-line",
@@ -79,6 +83,8 @@ export function VistaPanel() {
   const evidencias = usarConsola((s) => s.evidencias);
   const ruidoAcumulado = usarConsola((s) => s.ruidoAcumulado);
   const cadena = usarConsola((s) => s.cadenaCustodia);
+  const sesion = usarConsola((s) => s.sesion);
+  const [editarRoe, setEditarRoe] = useState(false);
 
   if (!engagement) return null;
 
@@ -210,6 +216,15 @@ export function VistaPanel() {
             <TituloSeccion
               titulo="ROE máquina-legible"
               descripcion="Política firmada en F0: el boundary la aplica antes de cada tool call"
+              accion={
+                sesion && sesion.rol !== "lector" ? (
+                  <Button variant="outline" size="sm"
+                          className="h-8 border-line text-zinc-300 hover:bg-panel hover:text-zinc-100"
+                          onClick={() => setEditarRoe(true)}>
+                    <PenLine className="mr-1.5 h-3.5 w-3.5" /> Editar
+                  </Button>
+                ) : null
+              }
             />
             <div className="space-y-4 text-sm">
               <div>
@@ -320,6 +335,8 @@ export function VistaPanel() {
           </Tarjeta>
         </Entrada>
       </div>
+
+      <DialogoRoe abierto={editarRoe} cerrar={() => setEditarRoe(false)} />
 
       {/* Últimos hallazgos */}
       {hallazgos.length > 0 && (

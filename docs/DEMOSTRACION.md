@@ -115,6 +115,57 @@ en un móvil sin overflow: operativo desde el móvil durante un engagement.
 
 ---
 
+## 8. Novedades v28: ROE vivo, auditoría del sistema e higiene
+
+### 8.1 Panel del caso con ROE y techo de ruido
+
+![Panel v28](demo/v28-01-panel.png)
+
+KPIs del engagement (fase activa, aprobaciones pendientes, hallazgos
+críticos/altos, coste IA), feed de actividad del agente en SSE y el ROE
+máquina-legible con su techo de ruido a escala del corte duro. El botón
+**Editar** abre el ROE vivo para cambios legítimos en caliente.
+
+### 8.2 Edición del ROE vivo
+
+![Editor ROE v28](demo/v28-02-roe-dialogo.png)
+
+Techo de ruido (0-100), ventana horaria con días de actividad y exclusiones
+de alcance, línea a línea. El boundary valida CADA mutación y el cambio
+queda auditado con la identidad del operador; el alcance principal y las
+técnicas prohibidas exigen un ROE re-firmado, no una edición rápida.
+
+### 8.3 Hallazgos con validación Sigma
+
+![Hallazgos v28](demo/v28-04-hallazgos.png)
+
+Cobertura de detección purple (VECTR), panel detection-as-code que valida
+estructuralmente cada regla Sigma del caso ANTES de desplegarla en el SIEM,
+y detección blue team por hallazgo (pendiente/detectado/no detectado/prevenido).
+
+### 8.4 Equipo: organizaciones, auditoría del sistema y respaldo
+
+![Equipo v28](demo/v28-08-equipo.png)
+
+Organizaciones multi-tenant con reasignación de cuentas cross-tenant
+(la nueva organización revoca las sesiones previas del operador), auditoría
+append-only del despliegue (altas, bajas, cambios de rol y organización,
+respaldos) y respaldo completo `VACUUM INTO` con manifiesto SHA-256.
+
+### 8.5 Higiene de la cuenta
+
+![Higiene v28](demo/v28-09-higiene.png)
+
+Estado vivo de la sesión: rol y organización vigentes según el middleware de
+revocación, emisión y caducidad del JWT (con aviso de caducidad próxima) y
+"cerrar en todos los dispositivos" (sign-out-everywhere auditable).
+
+### 8.6 Panel en móvil (390 px)
+
+![Móvil v28](demo/v28-10-movil-panel.png)
+
+---
+
 ## Ejecuta tu propia demo
 
 ```bash

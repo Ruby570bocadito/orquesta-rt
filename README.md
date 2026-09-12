@@ -14,14 +14,19 @@
 
 ![Recorrido de la consola](docs/demo/recorrido.gif)
 
-*Recorrido real: acceso del operador → campañas → matriz de cobertura ATT&CK
-entre campañas → hallazgos con purple teaming → webhooks firmados. Todo
-operando contra el orquestador y el laboratorio reales — sin maquetas.*
+*Recorrido real: panel del caso en vivo (KPIs, feed SSE, ROE) → edición del
+ROE vivo (v28) → aprobaciones del boundary → hallazgos con validación Sigma →
+matriz de cobertura ATT&CK entre campañas → cadenas threat-led → copiloto
+IA → gestión del equipo con auditoría del sistema (v28) → higiene de la
+cuenta. Todo operando contra el orquestador y el laboratorio reales — sin
+maquetas.*
 
 | | |
 |---|---|
-| ![Panel del operador](docs/demo/03-panel.png) | ![Cobertura ATT&CK](docs/demo/04-cobertura.png) |
-| *Panel del caso en vivo (SSE): fases, aprobaciones, parada de emergencia.* | *Cobertura ATT&CK entre campañas: heatmap estilo Navigator, detección VECTR, técnicas recurrentes.* |
+| ![Panel del operador](docs/demo/v28-01-panel.png) | ![Editor del ROE vivo](docs/demo/v28-02-roe-dialogo.png) |
+| *Panel del caso en vivo (SSE): KPIs, actividad del agente, ROE con techo de ruido y custodia.* | *ROE vivo editable (v28): techo de ruido, ventana horaria y exclusiones, auditado con identidad.* |
+| ![Hallazgos con Sigma](docs/demo/v28-04-hallazgos.png) | ![Auditoría del sistema](docs/demo/v28-08-equipo.png) |
+| *Hallazgos con detección VECTR y validación detection-as-code (Sigma) antes de entregar al SIEM.* | *Equipo multi-tenant (v28): reasignación de organización, auditoría del despliegue y respaldo completo.* |
 
 ---
 
@@ -71,7 +76,7 @@ común, y la detección del defensor es un resultado de primera clase
 | Capacidad | Estado | Detalle |
 |---|---|---|
 | Orquestación F0→F7 | ✅ Real | Grafo LangGraph; agentes de fase; pausa por aprobaciones; SSE en vivo |
-| Boundary ROE + riesgo | ✅ Real | Scope (dominios/CIDRs), política (técnicas prohibidas, ventana, techo de ruido), riesgo; kill switch |
+| Boundary ROE + riesgo | ✅ Real | Scope (dominios/CIDRs), política (técnicas prohibidas, ventana, techo de ruido), riesgo; kill switch; **ROE vivo editable en caliente desde la consola (v28), cada cambio auditado con identidad** |
 | Cadena de custodia | ✅ Real | SHA-256 + HMAC encadenados por evidencia; re-verificación en el navegador |
 | OSINT + grafo de empleados | ✅ Real | Recolectores reales (CT logs, DNS, crt.sh, HIBP, SPF/DMARC/DKIM…), grafo en consola |
 | Recon | ✅ Real | 26+ transportes: puertos por socket, TLS, fingerprint, sitemap, artefactos sensibles |
@@ -86,6 +91,8 @@ común, y la detección del defensor es un resultado de primera clase
 | Multi-tenant RBAC | ✅ Real | Roles admin/gestor/operador/lector firmados en el JWT; aislamiento de casos por organización en la API |
 | Webhooks | ✅ Real | Entrega firmada HMAC-SHA256, reintentos acotados, anti-SSRF, historial de entregas |
 | Purple teaming | ✅ Real | Registro de detección/preención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida y VALIDADOS antes de la entrega |
+| CTEM continuo | ✅ Real | Corridas continuas por cadena (programables), bucle CTEM↔purple↔Sigma: solo cuenta cobertura la regla válida que el azul verificó; anota gains y regresiones entre corridas |
+| Higiene de sesión | ✅ Real | Sesiones revocables, estado vivo de la cuenta, sign-out-everywhere, aviso de caducidad próxima del JWT |
 | Cobertura ATT&CK | ✅ Real | Matriz técnica × campaña entre casos, CSV exportable, capa Navigator |
 | Copiloto IA | ✅ Real | GLM vía puente OpenAI-compatible; RAG BM25 sobre la memoria del caso; nunca ejecuta acciones |
 | Informe + cierre | ✅ Real | Markdown español con ATT&CK, DOCX/PDF, certificado de borrado documentado |
@@ -200,20 +207,23 @@ Para operar contra el lab local, crea el caso con dominio `localhost` y CIDR
 │   │   ├── transportes.py        Herramientas reales de red (26+ transportes)
 │   │   ├── ad.py / persistencia.py / evasion.py   Capacidades ofensivas (lab, bajo ROE)
 │   │   ├── threatled.py          Cadenas Atomic Red Team + contraste con evidencia
+│   │   ├── ctem.py               Modo continuo CTEM: corridas programadas + bucle Sigma
 │   │   ├── razonador.py          Plan de fase adaptativo validado contra el catálogo real
-│   │   ├── copiloto.py           Copiloto IA (RAG BM25 sobre la memoria del caso)
+│   │   ├── copiloto.py           Copiloto IA (RAG BM25 + escudo OWASP LLM01:2025)
 │   │   ├── cobertura_attack.py   Matriz ATT&CK técnica × campaña entre casos
 │   │   ├── purpleteam.py         Registro VECTR + esqueletos Sigma
+│   │   ├── sigma_valid.py        Validación estructural de reglas Sigma antes de entregarlas
 │   │   ├── webhook.py            Receptores firmados HMAC + entregas
 │   │   ├── navigator.py          Capas MITRE ATT&CK Navigator
 │   │   ├── reporting.py          Informe español (MD/HTML) + ATT&CK
 │   │   ├── respaldo.py           ZIP de archivo con manifiesto (VACUUM INTO)
 │   │   └── api.py                API FastAPI de la consola
 │   ├── integraciones/            bloodhound.py · misp.py · nvd.py (protocolo oficial)
-│   ├── mcp/                      Servidores MCP: recon, evidencias, OSINT, adaptador C2
+│   ├── lab/                      MISP de laboratorio + servidor objetivo HTTP
+│   ├── servidores_mcp/           Servidores MCP: recon, evidencias, OSINT, adaptador C2
 │   ├── skills/                   asrep_roasting_lab · kerberoasting_lab · llmnr_poisoning_lab
 │   ├── roe/                      Plantilla de ROE máquina-legible
-│   └── tests/                    Suite pytest (290 tests)
+│   └── tests/                    Suite pytest (509 tests)
 ├── lab/                          Laboratorio: objetivo HTTP+AD, Keycloak, Neo4j,
 │                                 colector de dominio, docker-compose.lab.yml
 ├── deploy/                       Kubernetes (manifiestos + guía de despliegue)
@@ -248,6 +258,13 @@ informe en español ✔ · SSO + multi-tenant + despliegue Docker/K8s ✔.
 Siguiente:
 
 - **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
+
+Completado en v28:
+
+- **ROE vivo editable desde la consola**: el diálogo de edición en el Panel cubre los cambios legítimos en caliente — techo de ruido, ventana horaria (inicio/fin/días) y exclusiones de alcance — con la misma validación del boundary y auditoría con identidad. El alcance principal y las técnicas prohibidas siguen exigiendo un ROE re-firmado: la edición rápida no sustituye al contrato.
+- **Auditoría del sistema en la vista Equipo**: el admin ya ve la traza append-only del despliegue (altas y bajas, cambios de rol y organización, respaldos) que antes solo existía en `usuarios.db`.
+- **Reasignación cross-tenant de cuentas**: el chip de organización de cada operador es ahora un selector que mueve la cuenta de organización (revoca sus sesiones previas, como exige la higiene de identidad).
+- **Recorrido del README regenerado** con la consola actual: GIF + capturas v28 (panel, ROE vivo, hallazgos con Sigma, equipo con auditoría del sistema, higiene, móvil).
 
 Completado en v27:
 

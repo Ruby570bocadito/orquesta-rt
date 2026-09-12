@@ -106,6 +106,16 @@ export interface EventoAuditoria {
   creado_en: string;
 }
 
+/** Evento de auditoría a nivel DESPLIEGUE (respaldos, gestión de cuentas,
+ * organizaciones): vive en usuarios.db, no en la memoria del caso. */
+export interface EventoSistema {
+  id: number;
+  actor: string;
+  accion: string;
+  detalle: string;
+  creado_en: string;
+}
+
 export type TipoObjetivo = "dominio" | "host" | "servicio" | "credencial" | "ruta" | "activo_humano";
 export type EstadoObjetivo = "descubierto" | "confirmado" | "riesgo" | "explotado" | "neutralizado";
 

@@ -526,6 +526,8 @@ interface EstadoConsola {
   webhooksOcupado: boolean;
   // equipo (admin)
   operadores: OperadorCuenta[] | null;
+  // auditoría a nivel despliegue (admin, v28)
+  auditoriaSistema: import("./tipos").EventoSistema[] | null;
   // diferencial de superficie
   difSuperficie: DifSuperficie | null;
   difOcupado: boolean;
@@ -552,6 +554,13 @@ interface EstadoConsola {
   registrarHallazgo(datos: { titulo: string; severidad: string; tecnica_mitre?: string; activo?: string; descripcion?: string; recomendacion?: string }): Promise<{ id: string }>;
   marcarDeteccion(hallazgoId: string, deteccion: Hallazgo["deteccion"]): Promise<void>;
   paradaEmergencia(activar: boolean, motivo?: string): Promise<void>;
+  actualizarRoe(datos: {
+    techo_ruido?: number;
+    ventana_inicio?: string;
+    ventana_fin?: string;
+    ventana_dias?: string[];
+    alcance_excluido?: string[];
+  }): Promise<{ cambios: string[] }>;
   alternarPausa(): void;
   cargarIntegraciones(): Promise<void>;
   probarIntegracion(nombre: string): Promise<void>;
@@ -600,8 +609,10 @@ interface EstadoConsola {
   cargarOperadores(): Promise<void>;
   crearOperadorCuenta(usuario: string, contrasena: string, rol: string, tenant_id?: string): Promise<void>;
   cambiarRolOperador(usuario: string, rol: string): Promise<void>;
+  moverTenant(usuario: string, tenant_id: string): Promise<void>;
   restablecerOperador(usuario: string, nueva: string): Promise<void>;
   eliminarOperadorCuenta(usuario: string): Promise<void>;
+  cargarAuditoriaSistema(): Promise<void>;
   // diferencial de superficie
   calcularDif(desde: string, hasta?: string): Promise<void>;
   limpiarDif(): void;
@@ -831,6 +842,7 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
   canalHeredado: null,
   webhooksOcupado: false,
   operadores: null,
+  auditoriaSistema: null,
   difSuperficie: null,
   difOcupado: false,
   arsenal: null,
@@ -1148,6 +1160,20 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
       }),
     });
     await get().refrescar();
+  },
+
+  // v28: ROE vivo editable desde la consola (techo de ruido, ventana
+  // horaria y exclusiones). El backend valida CADA mutación y audita el
+  // cambio con la identidad real de la sesión.
+  async actualizarRoe(datos) {
+    const id = get().casoActivo;
+    if (!id) throw new Error("no hay caso activo");
+    const r = await api<{ roe: Engagement["roe"]; cambios: string[] }>(
+      `/engagements/${id}/roe`,
+      { method: "POST", body: JSON.stringify(datos) },
+    );
+    await get().refrescar();
+    return { cambios: r.cambios ?? [] };
   },
 
   alternarPausa() {
@@ -1666,6 +1692,22 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
   async eliminarOperadorCuenta(usuario: string) {
     await api("/auth/eliminar", { method: "POST", body: JSON.stringify({ usuario }) });
     await get().cargarOperadores();
+  },
+
+  // v28: mover una cuenta de organización (cross-tenant, admin). El
+  // backend invalida las sesiones emitidas antes del cambio.
+  async moverTenant(usuario: string, tenant_id: string) {
+    await api("/auth/tenant", {
+      method: "POST", body: JSON.stringify({ usuario, tenant_id }),
+    });
+    await get().cargarOperadores();
+  },
+
+  // v28: auditoría del despliegue (respaldos, altas/bajas, organizaciones).
+  async cargarAuditoriaSistema() {
+    const lista = await api<import("./tipos").EventoSistema[]>(
+      "/admin/auditoria-sistema?limite=200");
+    set({ auditoriaSistema: lista });
   },
 
   // ------------------------------------------------------------------

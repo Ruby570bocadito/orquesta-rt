@@ -35,6 +35,9 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   reactStrictMode: false,
+  // z1 (v28): el indicador de desarrollo de Next contamina capturas y
+  // demostraciones de la consola; el despliegue real es producción standalone.
+  devIndicators: false,
 };
 
 export default nextConfig;

@@ -175,7 +175,7 @@ export function Acceso() {
                   required
                   minLength={3}
                   maxLength={32}
-                  pattern="[A-Za-z0-9._-]{3,32}"
+                  pattern="[A-Za-z0-9._\-]{3,32}"
                   autoComplete="username"
                   autoFocus
                   placeholder="p. ej. ana.red"
