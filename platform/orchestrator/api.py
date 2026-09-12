@@ -61,6 +61,7 @@ from .graph import OrquestadorEngagement
 from .skills import BibliotecaSkills
 from .transportes import transportes_de
 from . import threatled
+from . import ctem
 
 try:
     from . import sso
@@ -74,10 +75,33 @@ RAIZ_SKILLS = Path(os.environ.get("RAIZ_SKILLS", "skills"))
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Ciclo de vida moderno de FastAPI (sustituye a on_event, deprecado):
-    registra el guardián del sidecar sin bloquear el arranque."""
+    registra el guardián del sidecar sin bloquear el arranque y arranca el
+    planificador CTEM (corridas continuas de cadenas threat-led)."""
     import asyncio
     asyncio.get_running_loop().run_in_executor(None, _sidecar_arranque)
-    yield
+
+    async def _bucle_ctem() -> None:
+        """Corridas programadas del modo continuo: cada CTEM_SEGUNDOS (60
+        por defecto) comprueba programas vencidos en TODOS los casos y
+        ejecuta sus corridas. Los fallos de una BD no detienen el bucle."""
+        import os as _os
+        try:
+            periodo = max(10, int(_os.environ.get("CTEM_SEGUNDOS", "60")))
+        except ValueError:
+            periodo = 60
+        while True:
+            await asyncio.sleep(periodo)
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, ctem.ejecutar_pendientes, RAIZ_CASOS)
+            except Exception:
+                continue  # el planificador nunca tumba la API
+
+    _tarea_ctem = asyncio.create_task(_bucle_ctem())
+    try:
+        yield
+    finally:
+        _tarea_ctem.cancel()
 
 
 app = FastAPI(
@@ -2345,6 +2369,117 @@ def threatled_plan(engagement_id: str, p: PeticionPlanThreatled,
             creado_en=datetime.now(timezone.utc).isoformat()))
         plan["evidencia_id"] = ev.id
         return plan
+
+
+# ---------------------------------------------------------------------------
+# Modo continuo CTEM (v23): la exposición se mide PERIÓDICAMENTE. Una corrida
+# es una instantánea REAL del caso (hallazgos, auditoría, detecciones VECTR)
+# contrastada con la cadena y con la corrida anterior (delta). La corrida
+# MIDE: no ejecuta técnicas ni fabrica argumentos — eso sigue siendo
+# territorio del operador y del boundary.
+# ---------------------------------------------------------------------------
+
+
+class PeticionProgramaCtem(BaseModel):
+    cadena_id: str = Field(min_length=3, max_length=60)
+    intervalo_horas: int = Field(ge=ctem.INTERVALO_MIN_HORAS,
+                                 le=ctem.INTERVALO_MAX_HORAS)
+
+
+class PeticionCorridaCtem(BaseModel):
+    cadena_id: str = Field(min_length=3, max_length=60)
+
+
+@app.get("/api/engagements/{engagement_id}/ctem")
+def ctem_estado(engagement_id: str, request: Request) -> dict[str, Any]:
+    """Estado continuo del caso: programas, corridas y último delta."""
+    with _memoria_de(engagement_id) as memoria:
+        if memoria.obtener_engagement(engagement_id) is None:
+            raise HTTPException(404, "no existe")
+        programas = ctem.programas_de(memoria, engagement_id)
+        corridas = ctem.corridas_de(memoria, engagement_id, limite=50)
+        ultimo = corridas[0]["resumen"] if corridas else None
+        return {
+            "programas": programas,
+            "corridas": corridas,
+            "ultimo_resumen": ultimo,
+            "ultimo_delta": (ultimo or {}).get("delta"),
+        }
+
+
+@app.post("/api/engagements/{engagement_id}/ctem/programas")
+def ctem_programar(engagement_id: str, p: PeticionProgramaCtem,
+                   request: Request) -> dict[str, Any]:
+    """Programa (o reprograma) una cadena como instrumento continuo:
+    corrida automática cada `intervalo_horas` (planificador del despliegue)."""
+    identidad = operador_de(request)
+    cadena = threatled.obtener(p.cadena_id)
+    if cadena is None:
+        raise HTTPException(
+            404, f"Cadena '{p.cadena_id}' no existe: consulta /api/threatled/cadenas")
+    with _memoria_de(engagement_id) as memoria:
+        if memoria.obtener_engagement(engagement_id) is None:
+            raise HTTPException(404, "no existe")
+        try:
+            programa = ctem.programar(
+                memoria, engagement_id, p.cadena_id, p.intervalo_horas,
+                operador=identidad)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        memoria.registrar_auditoria(
+            engagement_id, Actor.HUMANO, "ctem.programar",
+            detalle=(f"Cadena '{cadena.nombre}' {programa['estado']} en modo "
+                     f"continuo: corrida cada {p.intervalo_horas} h"),
+            herramienta="ctem", resultado="ok")
+        return programa
+
+
+@app.post("/api/engagements/{engagement_id}/ctem/corridas")
+def ctem_corrida(engagement_id: str, p: PeticionCorridaCtem,
+                 request: Request) -> dict[str, Any]:
+    """Ejecuta una corrida AHORA: instantánea real + delta contra la corrida
+    anterior de la misma cadena. Custodiada como evidencia y notificada por
+    webhook a los receptores suscritos a `ctem.corrida`."""
+    identidad = operador_de(request)
+    cadena = threatled.obtener(p.cadena_id)
+    if cadena is None:
+        raise HTTPException(
+            404, f"Cadena '{p.cadena_id}' no existe: consulta /api/threatled/cadenas")
+    with _memoria_de(engagement_id) as memoria:
+        if memoria.obtener_engagement(engagement_id) is None:
+            raise HTTPException(404, "no existe")
+        resumen = ctem.ejecutar_corrida(
+            memoria, engagement_id, cadena, disparo="manual",
+            operador=identidad)
+        try:
+            from .webhook import despachar_en_segundo_plano
+            despachar_en_segundo_plano(
+                "ctem.corrida", engagement_id,
+                {"corrida_id": resumen["corrida_id"],
+                 "cadena_id": cadena.id,
+                 "cobertura": resumen["cobertura"],
+                 "delta": resumen["delta"]})
+        except Exception:
+            pass  # los webhooks nunca bloquean la operación (v16)
+        return resumen
+
+
+@app.delete("/api/engagements/{engagement_id}/ctem/programas/{programa_id}")
+def ctem_cancelar(engagement_id: str, programa_id: str,
+                  request: Request) -> dict[str, Any]:
+    """Detiene el modo continuo de una cadena (historial conservado)."""
+    identidad = operador_de(request)
+    with _memoria_de(engagement_id) as memoria:
+        try:
+            resultado = ctem.cancelar(memoria, engagement_id, programa_id)
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+        memoria.registrar_auditoria(
+            engagement_id, Actor.HUMANO, "ctem.cancelar",
+            detalle=(f"Programa continuo {programa_id} detenido "
+                     f"(cadena {resultado['cadena_id']}) por {identidad}"),
+            herramienta="ctem", resultado="ok")
+        return resultado
 
 
 # ---------------------------------------------------------------------------

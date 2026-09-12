@@ -52,6 +52,7 @@ EVENTOS: tuple[str, ...] = (
     "aprobacion.solicitada",
     "aprobacion.decidida",
     "roe.parada_emergencia",
+    "ctem.corrida",
     "webhook.prueba",
 )
 

@@ -231,6 +231,10 @@ class MemoriaCaso:
         # escritores en vez de fallar la petición del operador.
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(SCHEMA)
+        # v23 modo continuo CTEM: tablas de programas y corridas (migración
+        # idempotente — CREATE TABLE IF NOT EXISTS en BDs ya abiertas).
+        from .ctem import crear_tablas as _ctem_tablas
+        _ctem_tablas(self._conn)
         # -- migraciones incrementales --------------------------------------
         # Casos creados antes de la columna `deteccion` (purple teaming):
         # ALTER TABLE idempotente guiado por table_info (CREATE TABLE IF NOT
