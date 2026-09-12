@@ -426,7 +426,11 @@ def cliente_z2(tmp_path, monkeypatch):
 
 
 def test_salud_usa_la_variable_correcta(cliente_z2) -> None:
-    r = cliente_z2.get("/api/salud")
+    # z3 (sesión 2): /api/salud anónima devuelve el mínimo ({estado,
+    # servicio, version}); el detalle de componentes exige sesión viva.
+    # Este contrato verifica la BD de operadores: se consulta autenticado.
+    cabeceras = cliente_z2.token_de("adminz2", "ClaveZ2segura1")
+    r = cliente_z2.get("/api/salud", headers=cabeceras)
     assert r.status_code == 200
     componentes = r.json()["componentes"]
     assert componentes["operadores"]["ok"] is True, \

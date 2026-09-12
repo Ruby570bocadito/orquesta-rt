@@ -76,10 +76,21 @@ def test_sso_cuenta_admin_se_enlaza_con_preaprobacion(bd_temporal) -> None:
         _auth.crear_o_vincular_sso(sso_sub="sub-distinto", usuario="jefe2")
 
 
-def test_sso_cuenta_lectora_se_enlaza_sin_env_como_antes(bd_temporal,
-                                                         monkeypatch) -> None:
+def test_sso_cuenta_lectora_se_enlaza_con_decision_explicita(
+        bd_temporal, monkeypatch) -> None:
+    """z3 + z2 (fusión de semanticas): NINGUNA cuenta local homónima se
+    enlaza en silencio por el claim preferred_username (toma de cuenta
+    segura por defecto, z2-ronda-1 — aplica también a lector/operador).
+    La vía explícita del admin es la pre-aprobación de z3 (caduca a 30
+    días) o el flag SSO_VINCULAR_POR_NOMBRE=1 para IdPs de confianza."""
     monkeypatch.delenv("OIDC_DOMINIOS_PERMITIDOS", raising=False)
+    monkeypatch.delenv("SSO_VINCULAR_POR_NOMBRE", raising=False)
     _auth.crear_operador("ana", "ClaveAna-1234!", rol="lector")
+    with pytest.raises(ValueError, match="coincide con una cuenta"):
+        _auth.crear_o_vincular_sso(sso_sub="sub-ana-1", usuario="ana")
+    # Decisión EXPLÍCITA del admin: el vínculo de la lectora funciona y
+    # queda auditado (mismo flujo que antes, ahora con autorización).
+    _auth.preaprobar_vinculo_sso("cli:admin", "ana", "sub-ana-1")
     cuenta = _auth.crear_o_vincular_sso(sso_sub="sub-ana-1", usuario="ana")
     assert cuenta["rol"] == "lector"
 
