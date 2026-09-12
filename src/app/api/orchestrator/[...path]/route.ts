@@ -24,6 +24,20 @@ export const runtime = "nodejs";
 const BASE = process.env.ORCHESTRATOR_URL ?? "http://127.0.0.1:8000";
 
 async function reenviar(req: NextRequest, segmentos: string[]) {
+  // z3 (auditoría sesión 4): los segmentos "." / ".." permiten, tras la
+  // normalización de URL del cliente HTTP (WHATWG), alcanzar rutas del
+  // backend FUERA de /api (p. ej. /api/../openapi.json → /openapi.json),
+  // que no pasan por la autenticación del orquestador. Se rechazan aquí,
+  // antes de construir el destino.
+  if (segmentos.some((s) => s === "." || s === "..")) {
+    return NextResponse.json(
+      {
+        error: "ruta_invalida",
+        detalle: "Los segmentos de ruta no pueden ser '.' ni '..'.",
+      },
+      { status: 400 },
+    );
+  }
   const ruta = segmentos.map(encodeURIComponent).join("/");
   const consulta = req.nextUrl.search ?? "";
   const destino = `${BASE}/api/${ruta}${consulta}`;

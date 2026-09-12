@@ -110,11 +110,20 @@ async def _lifespan(app: FastAPI):
         _tarea_ctem.cancel()
 
 
+# z3 (auditoría sesión 4): /docs, /redoc y /openapi.json NO pasan por la
+# autenticación de sesión y eran alcanzables desde Internet a través del
+# proxy de la consola (la normalización de URL resuelve segmentos ".." en
+# /api/orchestrator/../openapi.json → /openapi.json). En producción se
+# desactivan; ORQUESTA_DOCS=1 las reactiva en desarrollo.
+_docs_abiertas = os.environ.get("ORQUESTA_DOCS", "") == "1"
 app = FastAPI(
     title="Plataforma Red Team Orquestado por IA",
     version="0.1.0",
     description="Consola API del orquestador — operator-in-command.",
     lifespan=_lifespan,
+    docs_url="/docs" if _docs_abiertas else None,
+    redoc_url="/redoc" if _docs_abiertas else None,
+    openapi_url="/openapi.json" if _docs_abiertas else None,
 )
 app.add_middleware(
     CORSMiddleware,

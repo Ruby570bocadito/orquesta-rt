@@ -4,7 +4,7 @@ Los agentes de fase no llaman a la red directamente: invocan herramientas
 a través del boundary de guardrails, y el boundary ejecuta la función de
 este módulo asociada al nombre "servidor.tool".
 
-Son las MISMAS operaciones que exponen los servidores MCP de platform/mcp/
+Son las MISMAS operaciones que exponen los servidores MCP de platform/servidores_mcp/
 (recon, osint), aquí enlazadas en proceso para que la API del orquestador
 las ejecute sin depender del SDK de MCP en runtime. Cada herramienta:
 

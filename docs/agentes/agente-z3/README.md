@@ -12,6 +12,7 @@
 > | 1 | 2026-09-12 | [`sesion-1-auditoria-seguridad.md`](sesion-1-auditoria-seguridad.md) | Auditoría integral: secretos en repo, proxy abierto, BOLA multi-tenant, revocación de sesiones, clave HMAC de custodia, SSRF, rate limiting, CSV, CORS, CSP |
 > | 2 | 2026-09-12 | [`sesion-2-tls-sso-endurecimiento.md`](sesion-2-tls-sso-endurecimiento.md) | TLS seguro por defecto en 17 clientes, secuestro de cuentas SSO, `/api/salud` sin topología, STARTTLS verificado, guardia nmap, `.env.example` |
 > | 3 | 2026-09-12 | [`sesion-3-v24-tercera-ronda.md`](sesion-3-v24-tercera-ronda.md) | Código v24 (MISP lab + Sigma), módulos de razonamiento/CTEM, rutas no-engagement, informe markdown, endurecimiento de puertos Docker |
+> | 4 | 2026-09-12 | [`sesion-4-mcp-superficie-y-endurecimiento.md`](sesion-4-mcp-superficie-y-endurecimiento.md) | Servidores MCP (SSRF osint, saneado LLM01, TLS fail-open, paquete inarrancable), superficie OpenAPI + path-traversal del proxy, revisión de núcleo/infra restante |
 
 ## Metodología
 
@@ -67,3 +68,9 @@
 | F22 | BAJO | 3 | Remediado (puertos Docker solo loopback) |
 | F23 | BAJO | 3 | Remediado (nombres Sigma únicos en ZIP) |
 | F24 | BAJO | 3 | Remediado (dedup de errores Sigma) |
+| F25 | BAJO | 4 | Remediado (OpenAPI desactivada + guardia traversal del proxy) |
+| F26 | MEDIO | 4 | Remediado (SSRF robots_txt: dominio validado + redirects fijados) |
+| F27 | BAJO | 4 | Remediado (query crt.sh codificada) |
+| F28 | MEDIO | 4 | Remediado (saneado LLM01 unificado en los MCP) |
+| F29 | BAJO | 4 | Remediado (TLS fail-open eliminado + guardia AST) |
+| F30 | MEDIO | 4 | Remediado (paquete servidores_mcp: la capa MCP ya arranca) |

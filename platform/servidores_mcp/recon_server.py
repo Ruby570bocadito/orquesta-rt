@@ -18,8 +18,8 @@ despliegue de producción se arranca tras el boundary del orquestador: el
 servidor CONFIÓ en que la petición ya pasó guardrails, pero además aplica
 una segunda verificación defensiva de scope local (defensa en profundidad).
 
-Uso:  python -m mcp.recon_server          (stdio)
-      python -m mcp.recon_server --transport sse --port 8001
+Uso:  python -m servidores_mcp.recon_server          (stdio)
+      python -m servidores_mcp.recon_server --transport sse --port 8001
 """
 from __future__ import annotations
 
@@ -38,16 +38,14 @@ except ImportError:  # pragma: no cover
     raise SystemExit(
         "Falta el SDK de MCP. Instale requirements.txt: pip install mcp")
 
-# z3 (auditoría seguridad): política TLS centralizada del recon (igual que
-# en orchestrator/transportes.py). RECON_TLS_ESTRICTO=1 verifica certificados.
+# z3 (auditoría seguridad): política TLS centralizada del recon. La sesión 2
+# la introdujo vía orchestrator.transportes; la sesión 4 la unifica en
+# mcp.comun (sin fallback fail-open a verify=False y sin duplicación).
 import sys as _sys  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
-try:
-    from orchestrator.transportes import _cliente_http as _cliente_recon  # noqa: E402
-except Exception:  # pragma: no cover - despliegue solo-MCP sin orchestrator
-    def _cliente_recon(**kw):
-        return httpx.Client(verify=False, **kw)
+from servidores_mcp.comun import cliente_recon as _cliente_recon  # noqa: E402
+from servidores_mcp.comun import saneado as _saneado  # noqa: E402
 
 mcp = FastMCP(
     "recon",
@@ -123,12 +121,16 @@ def http_probe(url: str) -> dict:
     try:
         with _cliente_recon(timeout=8, follow_redirects=False) as c:
             r = c.get(url if url.startswith("http") else f"https://{url}")
-        cabeceras = {k.lower(): v for k, v in r.headers.items()
+        cabeceras = {k.lower(): _saneado(v, 200) for k, v in r.headers.items()
                      if k.lower() in ("server", "x-powered-by", "content-type",
                                       "content-security-policy", "strict-transport-security",
                                       "location", "x-frame-options")}
+        # z3 (sesión 4): el título y las cabeceras son CONTENIDO CONTROLADO
+        # POR EL SERVIDOR EXTERNO. Igual que el servidor osint, se sanea
+        # antes de devolverlo al agente (mitigación LLM01 en profundidad:
+        # el escudo del copiloto v25 no cubre otros consumidores).
         return {"vivo": True, "estado": r.status_code, "cabeceras": cabeceras,
-                "longitud": len(r.content), "titulo": _titulo(r.text)}
+                "longitud": len(r.content), "titulo": _saneado(_titulo(r.text), 200)}
     except Exception as exc:
         return {"vivo": False, "error": str(exc)[:200]}
 
@@ -174,12 +176,14 @@ def tech_fingerprint(url: str) -> dict:
     except Exception as exc:
         return {"error": str(exc)[:200]}
     pistas: dict = {}
+    # z3 (sesión 4): cabeceras y meta-generator vienen del servidor externo:
+    # se sanea todo valor devuelto (ver mcp.comun.saneado).
     server = r.headers.get("server", "")
     if server:
-        pistas["server"] = server
+        pistas["server"] = _saneado(server, 200)
     powered = r.headers.get("x-powered-by", "")
     if powered:
-        pistas["framework"] = powered
+        pistas["framework"] = _saneado(powered, 200)
     cuerpo = r.text[:4000].lower()
     for firma, nombre in (("wp-content", "WordPress"), ("/static/js/vendor.",
                                                        "bundle estático"),
@@ -188,7 +192,7 @@ def tech_fingerprint(url: str) -> dict:
             pistas.setdefault("cuerpo", []).append(nombre)
     gen = r.text.lower().split('name="generator" content="')
     if len(gen) > 1:
-        pistas["generator"] = gen[1].split('"')[0][:80]
+        pistas["generator"] = _saneado(gen[1].split('"')[0][:80], 80)
     return {"url": url, "pistas": pistas}
 
 

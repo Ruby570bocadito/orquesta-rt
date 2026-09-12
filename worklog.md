@@ -730,3 +730,21 @@ Stage Summary:
 - Contratos nuevos: X-Orquesta-Intento en cada intento de webhook; componentes.limitador_auth {bloqueos_24h, claves_activas} en /api/salud autenticada; barra de ruido a escala del corte duro con marca del pactado.
 - Bitácora de z2 reorganizada en docs/agentes/z2/ (README + sesión por ronda); z2.md = punta de rastro.
 - Siguiente ronda propuesta (sesion-02-ronda-3.md): export Prometheus (/api/metricas, exige contadores acumulados), entregas del canal heredado en la consola, insignia "techo superado" en la cola de aprobaciones, test de contract de cabeceras webhook, SQLCipher (deferido a ventanilla de despliegue).
+
+---
+## z3 — sesión 4 (2026-09-12): servidores MCP, superficie OpenAPI y endurecimiento del proxy
+
+- ALCANCE: zonas NO cubiertas en sesiones 1-3 — servidores MCP, proxy consola→orquestador, persistencia/respaldo/sidecar/graph, CI, K8s, scripts de shell.
+- F25 (BAJO*, reclasificado contra código real): /docs, /redoc y /openapi.json sin auth propia, pero el middleware global ya devolvía 401 (RUTAS_PUBLICAS solo exime /api/*). Fixes mantenidos como defensa en profundidad: docs desactivadas por defecto (ORQUESTA_DOCS=1 en desarrollo) + proxy de la consola rechaza segmentos "."/".." con 400 (la normalización WHATWG resolvía /api/orchestrator/../openapi.json → /openapi.json; cerrada como CLASE).
+- F26 (MEDIO): osint_server.robots_txt interpolaba el dominio en la POSICIÓN DE AUTORIDAD (f"{esquema}://{dominio}/robots.txt") sin ninguna validación → "crt.sh@evil.com", "evil.com:8080", redirects arbitrarios = SSRF interno del servidor MCP. Fix: comun.dominio_valido() estricta (labels, TLD alfabético, ≤253, sin @:/?#%\ ni espacios, rechaza IPs literales) + redirecciones seguidas a mano (máx 3 saltos) SOLO dentro del dominio solicitado (www.<dominio> OK, evil.com no).
+- F27 (BAJO): subdominios_crtsh con query por f-string → inyección de parámetros en el proveedor público. Fix: httpx params={} codificados + guardia F26.
+- F28 (MEDIO): recon_server devolvía SIN sanear contenido controlado por el servidor externo (título, Server, X-Powered-By, meta generator) — inconsistencia LLM01 con osint. Fix: servidores_mcp/comun.py::saneado() compartida aplicada en http_probe y tech_fingerprint.
+- F29 (BAJO): fallback TLS fail-open en los MCP (httpx.Client(verify=False) fijo si orchestrator no importaba). Fix: comun.cliente_recon() con la MISMA política RECON_TLS_ESTRICTO de transportes + test AST que impide reintroducir verify=False en código de servidores_mcp/.
+- F30 (MEDIO): LOS SERVIDORES MCP NO ARRANCABAN con su invocación documentada: el paquete local platform/mcp/ sombrea el SDK PyPI mcp → "Falta el SDK de MCP" (SystemExit). Confirmado empíricamente. Fix: paquete renombrado a platform/servidores_mcp/ (docstrings de uso y comentario de transportes.py actualizados); python -m servidores_mcp.<server> --help → exit 0 en los 4; modo script suelto también OK.
+- TESTS: test_z3_sesion4.py — 37 tests, 37/37 (guardia AST, arranque subprocess de los 4 servidores, redirects robots_txt bloqueado/permitido, params crt.sh, saneado de título/cabeceras/generator, coexistencia paquete↔SDK). Suite completa: 10 failed / 383 passed / 8 skipped — los 10 fallos son EXACTAMENTE los preexistentes del entorno (yara/impacket/ldap3 ausentes; test_v19, test_v20, test_integraciones). Cero regresiones. bunx tsc --noEmit: sin errores en los ficheros tocados.
+- TRANSPARENCIA: patrones revisados y descartados documentados en la sesión (SQL dinámico de webhook seguro, subprocess en lista de persistencia, respaldo sin extractall, CERT_NONE necesario para inspección de certs, shell=True del C2 bajo ROE, regex acotadas, CI correcto, K8s con runAsNonRoot).
+
+Stage Summary:
+- 6 hallazgos remediados (F25-F30): total acumulado z3 → 30 fixes en 4 sesiones.
+- La capa MCP (recon/osint/evidencias/c2) vuelve a ser arrancable y sus herramientas de red ya validan dominio, fijan redirects, sane contenido externo y respetan la política TLS central.
+- Documentación: docs/agentes/agente-z3/sesion-4-mcp-superficie-y-endurecimiento.md + README índice actualizado (F1-F30).

@@ -26,7 +26,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Permite ejecutar en pie: python -m platform.mcp.c2_adapter_server
+# Permite ejecutar en pie: python -m servidores_mcp.c2_adapter_server
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from integraciones import metasploit, mythic, sliver  # noqa: E402

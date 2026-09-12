@@ -11,7 +11,7 @@ Herramientas:
 - verificar: valida la cadena completa del caso
 - exportar:  bundle JSON auditable (sin contenidos sensibles si se pide)
 
-Uso:  python -m mcp.evidence_server --caso casos/caso_demo_acme.db
+Uso:  python -m servidores_mcp.evidence_server --caso casos/caso_demo_acme.db
 """
 from __future__ import annotations
 
