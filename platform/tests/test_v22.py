@@ -165,6 +165,7 @@ def test_api_estado_integra_motor_rutas_y_nvd(_api, token_admin):
     assert r["nvd"]["configurado"] is True
 
 
+@pytest.mark.skipif(not NEO4J_OK, reason="Neo4j de laboratorio no disponible")
 def test_api_probar_alias_neo4j(_api, token_admin):
     r = _api.post("/api/integraciones/probar",
                   headers={"Authorization": f"Bearer {token_admin}"},
