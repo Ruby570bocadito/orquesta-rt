@@ -119,7 +119,8 @@ export interface EstadisticasMemoria {
   objetivos: number;
   resumenes: number;
   tamano_db_bytes: number;
-  cifrado_reposo: boolean;
+  /** CLAVE_CASO configurada: firma HMAC de evidencias (NO cifrado en reposo). */
+  clave_hmac_activa: boolean;
 }
 
 export interface CasoResumen {

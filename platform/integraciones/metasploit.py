@@ -33,6 +33,11 @@ class RpcMsf:
         self.host = os.environ.get("MSF_HOST", "127.0.0.1")
         self.puerto = int(os.environ.get("MSF_PORT", "55553"))
         self.ssl = os.environ.get("MSF_SSL", "") == "1"
+        # Verificación TLS por defecto (patrón MISP): por este canal viajan
+        # MSF_USER/MSF_PASS y el token RPC. msfrpcd emite un certificado
+        # autofirmado: para despliegues con PKI propia o proxy TLS, el
+        # opt-out explícito es MSF_TLS_VERIFICAR=0 (jamás silencioso).
+        self.verificar_tls = os.environ.get("MSF_TLS_VERIFICAR", "1") != "0"
         self.usuario = os.environ.get("MSF_USER", "")
         self.clave = os.environ.get("MSF_PASS", "")
         # z3 (auditoría seguridad): el RPC transporta el login y el token de

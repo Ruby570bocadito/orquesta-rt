@@ -33,6 +33,18 @@ from .models import (
     Severidad,
 )
 
+# Margen entre el nivel de ruido PACTADO en el ROE (techo_ruido, escala 0-100,
+# visible en la consola con aviso "techo superado") y el corte DURO del
+# boundary. El techo del ROE describe el perfil de detección acordado con el
+# cliente; el boundary lo traduce a un presupuesto acumulado del caso con
+# este margen de seguridad: con techo 50, la denegación dura llega a 250 de
+# ruido acumulado — suficiente para un engagement completo sin renegociación,
+# nunca infinito. Al cruzar el nivel PACTADO (dentro del margen) el boundary
+# sigue operando pero el motivo de cada decisión lo advierte: la auditoría y
+# las firmas humanas quedan informadas del exceso sobre lo acordado.
+_MARGEN_TECHO_RUIDO = 5
+
+
 # Catálogo de riesgo por familia de herramienta. Claves = prefijos de tool
 # registrados en los servidores MCP. Este mapa es la clasificación de riesgo
 # del boundary: no puede ser alterada por el modelo ni por un skill.
@@ -184,19 +196,52 @@ def _host_en_scope(host: str, roe: ROEPolitica) -> tuple[bool, str]:
     return False, f"dominio {host_limpio} fuera del alcance del ROE"
 
 
+def _minutos_hhmm(valor: str) -> Optional[int]:
+    """Convierte 'HH:MM' a minutos del día; None si el formato es inválido.
+
+    Estricto a propósito: el boundary no adivina horas. La validación del
+    modelo (VentanaHoraria) hace esto casi inalcanzable por API; se mantiene
+    como defensa en profundidad para ROE legados en BD. ANTES un formato
+    roto devolvía True (fail-open): el engagement quedaba sin control
+    horario y sin ningún aviso.
+    """
+    import re
+    if not re.fullmatch(r"\d{1,2}:\d{2}", (valor or "").strip()):
+        return None
+    h, m = (int(x) for x in valor.split(":"))
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return h * 60 + m
+
+
 def _en_ventana_horaria(roe: ROEPolitica, momento: datetime) -> bool:
+    """¿Está la ventana horaria del ROE activa en `momento`?
+
+    - Formato inválido: fail-CLOSED (deniega la actividad activa) — el
+      control horario nunca se salta por datos malformados.
+    - Ventanas que cruzan medianoche (inicio > fin, p. ej. 22:00→06:00):
+      válidas y soportadas. El tramo tras medianoche pertenece a la noche
+      que arrancó el día anterior (una ventana del viernes 22:00→06:00
+      cubre el sábado hasta las 06:00).
+    """
     dias = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
-    dia = dias[momento.weekday()]
-    if roe.ventanas_activas.dias and dia not in roe.ventanas_activas.dias:
-        return False
-    try:
-        h, m = map(int, roe.ventanas_activas.inicio.split(":"))
-        inicio = h * 60 + m
-        h, m = map(int, roe.ventanas_activas.fin.split(":"))
-        fin = h * 60 + m
-    except ValueError:
-        return True
+    inicio = _minutos_hhmm(roe.ventanas_activas.inicio)
+    fin = _minutos_hhmm(roe.ventanas_activas.fin)
+    if inicio is None or fin is None:
+        return False  # fail-closed: ventana indeterminada = actividad denegada
     actual = momento.hour * 60 + momento.minute
+    dias_cfg = [d.lower() for d in (roe.ventanas_activas.dias or [])]
+    if inicio > fin:
+        # Ventana nocturna que cruza medianoche.
+        if actual >= inicio:
+            return not dias_cfg or dias[momento.weekday()] in dias_cfg
+        if actual < fin:
+            noche_de_ayer = dias[(momento.weekday() - 1) % 7]
+            return not dias_cfg or noche_de_ayer in dias_cfg
+        return False
+    dia = dias[momento.weekday()]
+    if dias_cfg and dia not in dias_cfg:
+        return False
     return inicio <= actual < fin
 
 
@@ -325,19 +370,33 @@ class MotorGuardrails:
             self._auditar(herramienta, argumentos, fase, veredicto, actor)
             return veredicto
 
-        # (2b) Techo de ruido: si esta acción desborda el techo acordado
-        if self.ruido_acumulado + ruido > self.roe.techo_ruido * 5 and ruido > 30:
+        # (2b) Techo de ruido: presupuesto duro del caso. TODO ruido cuenta
+        # (también el de herramientas discretas): antes una exención arbitraria
+        # ruido>30 dejaba fuera del techo a toda la enumeración silenciosa y
+        # el perfil de detección pactado podía violarse sin límite.
+        presupuesto = self.roe.techo_ruido * _MARGEN_TECHO_RUIDO
+        if self.ruido_acumulado + ruido > presupuesto:
             veredicto = Veredicto(
                 decision=DecisionGuardrail.DENEGAR,
                 motivo="Techo de ruido del ROE agotado: el perfil de detección "
-                       "acordado con el cliente se excedería con esta acción. "
+                       "acordado con el cliente se excedería con esta acción "
+                       f"(acumulado {self.ruido_acumulado} + {ruido} > "
+                       f"presupuesto {presupuesto}). "
                        "Reduzca actividad o renegocie el ROE.",
                 riesgo=riesgo,
                 ruido_estimado=ruido,
-                referencia_roe=f"techo_ruido={self.roe.techo_ruido}",
+                referencia_roe=f"techo_ruido={self.roe.techo_ruido} "
+                               f"(margen x{_MARGEN_TECHO_RUIDO})",
             )
             self._auditar(herramienta, argumentos, fase, veredicto, actor)
             return veredicto
+        # Aviso (no bloqueo) cuando la acción cruza el nivel PACTADO: visible
+        # en la auditoría y en el motivo que firma el operador.
+        aviso_techo = ""
+        if self.ruido_acumulado + ruido > self.roe.techo_ruido:
+            aviso_techo = (f" ATENCIÓN: se supera el techo de ruido pactado "
+                           f"({self.ruido_acumulado}+{ruido} > "
+                           f"{self.roe.techo_ruido}).")
 
         # (2c) Ventana horaria de actividad activa
         if spec.get("ventana"):
@@ -363,7 +422,8 @@ class MotorGuardrails:
         if requiere:
             veredicto = Veredicto(
                 decision=DecisionGuardrail.REQUIERE_APROBACION,
-                motivo=self._motivo_aprobacion(herramienta, riesgo, ruido),
+                motivo=(self._motivo_aprobacion(herramienta, riesgo, ruido, spec)
+                        + aviso_techo),
                 riesgo=riesgo,
                 ruido_estimado=ruido,
                 referencia_roe=(
@@ -406,7 +466,8 @@ class MotorGuardrails:
         self.ruido_acumulado += ruido
         veredicto = Veredicto(
             decision=DecisionGuardrail.PERMITIR,
-            motivo=f"Dentro de scope y ROE (riesgo {riesgo.value}, ruido {ruido}).",
+            motivo=(f"Dentro de scope y ROE (riesgo {riesgo.value}, ruido {ruido})."
+                    + aviso_techo),
             riesgo=riesgo,
             ruido_estimado=ruido,
         )
@@ -485,11 +546,16 @@ class MotorGuardrails:
                    for p in self.roe.tecnicas_con_aprobacion)
 
     @staticmethod
-    def _motivo_aprobacion(herramienta: str, riesgo: Severidad, ruido: int) -> str:
+    def _motivo_aprobacion(herramienta: str, riesgo: Severidad, ruido: int,
+                           spec: Optional[dict[str, Any]] = None) -> str:
         base = (f"La acción '{herramienta}' (riesgo {riesgo.value}, ruido estimado "
                 f"{ruido}) supera el umbral de ejecución autónoma.")
-        extra = " Herramienta no catalogada: se aplica menor privilegio." \
-            if riesgo == Severidad.MEDIA and "no catalogada" in herramienta else ""
+        # El flag vive en el SPEC del boundary (herramienta desconocida →
+        # menor privilegio). Antes se comprobaba si el NOMBRE de la
+        # herramienta contenía "no catalogada": condición muerta, el aviso
+        # jamás aparecía en la firma que ve el operador.
+        extra = (" Herramienta no catalogada: se aplica menor privilegio."
+                 if spec and spec.get("motivo_extra") else "")
         return base + extra + " El operador debe aprobarla en consola."
 
     def _auditar(self, herramienta: str, argumentos: dict[str, Any], fase: Fase,

@@ -672,12 +672,31 @@ def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
     """Resuelve el login SSO REAL: cuenta ya enlazada → devolverla;
     usuario local existente sin enlace → enlazarlo SOLO si la política lo
     permite (z3: cuentas privilegiadas exigen pre-aprobación explícita y,
-    si hay dominio de confianza configurado, email federado verificado);
+    si hay dominio de confianza configurado, email federado verificado;
+    z2: la homonimia exige además SSO_VINCULAR_POR_NOMBRE=1 o vínculo
+    pre-aprobado);
     cuenta nueva → alta JIT como 'lector' (o el rol indicado) si auto_alta.
 
-    El hash guardado es UNREACHABLE (el acceso federado no usa contraseña
-    local); se guarda un token imposible de reproducir para que un intento
-    de login con contraseña directa no coincida jamás.
+    Vinculación por nombre DESACTIVADA por defecto (segura por defecto):
+    enlazar una cuenta local homónima solo porque el claim
+    preferred_username coincide permitía a un usuario federado que
+    eligiera ese nombre APROPIARSE de la cuenta (p. ej. 'admin'): el login
+    SSO devolvía el rol y la organización de la cuenta ajena. Ahora la
+    vinculación de una identidad federada a una cuenta local existente es
+    una decisión EXPLÍCITA del admin:
+
+      - via env SSO_VINCULAR_POR_NOMBRE=1 (despliegues que confían en el
+        IdP corporativo y su política de nombres), o
+      - via endpoint admin POST /api/auth/sso/vincular (enlace puntual,
+        auditado).
+
+    Con el flag desactivado, si la identidad federada colisiona con una
+    cuenta local se lanza ValueError accionable (ni JIT silencioso ni
+    enlace: el admin decide).
+
+    El hash guardado para cuentas JIT es UNREACHABLE (el acceso federado
+    no usa contraseña local); se guarda un token imposible de reproducir
+    para que un intento de login con contraseña directa no coincida jamás.
     """
     existente = obtener_por_sso(sso_sub)
     if existente:
@@ -697,21 +716,38 @@ def crear_o_vincular_sso(sso_sub: str, usuario: str, rol: str = "lector",
                 "SSO: se exige un email federado verificado de los dominios "
                 f"autorizados ({', '.join(sorted(dominios))}) para "
                 "vincular o dar de alta la identidad")
+    # z2 (ronda 1): la vinculación por homonimia está DESACTIVADA por
+    # defecto; el flag la abre solo en IdPs de confianza. Un vínculo
+    # PRE-APROBADO por admin (z3) es una decisión explícita y basta por sí
+    # mismo (se comprueba por cuenta, abajo).
+    vinculacion_por_nombre = os.environ.get("SSO_VINCULAR_POR_NOMBRE", "") == "1"
     conn = _conexion()
     try:
         fila = conn.execute(
             "SELECT usuario, rol, tenant_id FROM operadores WHERE usuario=?",
             (usuario,)).fetchone()
         if fila:
-            if rol_nivel(fila["rol"]) >= 3 and not _vinculo_preaprobado(
-                    conn, fila["usuario"], sso_sub):
-                # Cuentas gestor/admin: el nombre federado que coincide NO
-                # basta. Un admin debe pre-aprobar el vínculo explícitamente
-                # (CLI: orquesta sso-preaprobar <usuario> <sso_sub>).
+            preaprobado = _vinculo_preaprobado(conn, fila["usuario"], sso_sub)
+            if rol_nivel(fila["rol"]) >= 3 and not preaprobado:
+                # z3: cuentas gestor/admin — el nombre federado que coincide
+                # NO basta. Un admin debe pre-aprobar el vínculo
+                # explícitamente (CLI: orquesta sso-preaprobar).
                 raise ValueError(
                     f"SSO: la cuenta local privilegiada '{usuario}' exige "
                     "pre-aprobación explícita de un admin antes de enlazar "
                     "una identidad federada (orquesta sso-preaprobar)")
+            if not preaprobado and not vinculacion_por_nombre:
+                # z2: para el resto de cuentas la homonimia tampoco basta
+                # por sí sola (toma de cuenta de menor rol): hace falta el
+                # flag de IdP de confianza o un vínculo pre-aprobado.
+                raise ValueError(
+                    f"La identidad federada '{usuario}' coincide con una cuenta "
+                    "local existente y la vinculación por nombre está "
+                    "desactivada. Un administrador debe enlazarla de forma "
+                    "explícita (orquesta sso-preaprobar o "
+                    "POST /api/auth/sso/vincular) o activar "
+                    "SSO_VINCULAR_POR_NOMBRE=1 si su IdP garantiza la "
+                    "única propiedad de los nombres de usuario.")
             conn.execute("UPDATE operadores SET sso_sub=? WHERE usuario=?",
                          (sso_sub, usuario))
             conn.commit()
@@ -822,6 +858,43 @@ def eliminar_vinculo_preaprobado(actor: str, usuario: str) -> int:
             actor, "sso.preaprobacion_baja",
             f"pre-aprobación de vínculo federado retirada: '{usuario}'")
     return eliminados
+
+
+def vincular_sso_manual(usuario: str, sso_sub: str) -> dict[str, Any]:
+    """Enlaza una identidad federada (sub del IdP) a una cuenta local EXISTENTE
+    como decisión explícita del admin (endpoint auditado, no flujo de login).
+
+    Reemplaza el auto-enlace por homonimia: la confianza del claim
+    preferred_username la fija el admin, no el usuario federado.
+    """
+    usuario = (usuario or "").strip()
+    sso_sub = (sso_sub or "").strip()
+    if not usuario or not sso_sub:
+        raise ValueError("usuario y sso_sub son obligatorios")
+    if len(sso_sub) > 256:
+        raise ValueError("sso_sub demasiado largo")
+    conn = _conexion()
+    try:
+        fila = conn.execute(
+            "SELECT usuario, rol, tenant_id FROM operadores WHERE usuario=?",
+            (usuario,)).fetchone()
+        if fila is None:
+            raise ValueError(f"El usuario '{usuario}' no existe")
+        previo = conn.execute(
+            "SELECT usuario FROM operadores WHERE sso_sub=? AND usuario<>?",
+            (sso_sub, usuario)).fetchone()
+        if previo is not None:
+            raise ValueError(
+                f"El sub federado ya está enlazado a otra cuenta ({previo['usuario']})")
+        conn.execute("UPDATE operadores SET sso_sub=? WHERE usuario=?",
+                     (sso_sub, usuario))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"usuario": usuario, "sso_sub": sso_sub,
+            "rol": obtener_operador(usuario)["rol"],
+            "tenant_id": obtener_operador(usuario)["tenant_id"],
+            "vinculado": True}
 
 
 def listar_auditoria_sistema(limite: int = 200) -> list[dict[str, Any]]:

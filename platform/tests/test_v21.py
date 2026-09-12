@@ -370,7 +370,11 @@ def test_sso_flujo_completo_verifica_firma_y_alta_jit(idp_oidc) -> None:
     assert _auth.obtener_por_sso("uid-federado-42")["usuario"] == "maria.lopez"
 
 
-def test_sso_vincula_cuenta_local_existente_por_nombre(idp_oidc) -> None:
+def test_sso_vincula_cuenta_local_existente_por_nombre(idp_oidc, monkeypatch) -> None:
+    # La vinculación por homonimia es una decisión CONSCIENTE del despliegue
+    # (SSO_VINCULAR_POR_NOMBRE=1): el flag se activa aquí para verificar el
+    # flujo documentado para IdPs corporativos de confianza.
+    monkeypatch.setenv("SSO_VINCULAR_POR_NOMBRE", "1")
     _auth.crear_operador("maria.lopez", "ClaveLocalMuya1!", "operador")
     inicio = _sso.url_autorizacion()
     _fijar_nonce(inicio)
@@ -379,6 +383,36 @@ def test_sso_vincula_cuenta_local_existente_por_nombre(idp_oidc) -> None:
     assert cuenta["sso_sub"] == "uid-federado-42"
     # La cuenta sigue siendo accesible por contraseña (no se rompe nada)
     assert _auth.verificar_credenciales("maria.lopez", "ClaveLocalMuya1!")
+
+
+def test_sso_sin_flag_no_vincula_cuenta_local_por_nombre(idp_oidc, monkeypatch) -> None:
+    """SEGURA POR DEFECTO (Z2): un federado no se apropia de una cuenta local
+    eligiendo su preferred_username. Sin flag, la colisión lanza error
+    accionable y la cuenta local queda intacta (sin sub enlazado)."""
+    # La identidad del IdP de prueba es 'maria.lopez' (uid-federado-42):
+    # la cuenta local homónima existe → colisión → error accionable.
+    _auth.crear_operador("maria.lopez", "ClaveLocalMuya1!", "operador")
+    inicio = _sso.url_autorizacion()
+    _fijar_nonce(inicio)
+    with pytest.raises(ValueError, match="vincular"):
+        _sso.canjear_codigo("codigo", inicio["state"])
+    # La cuenta local NO fue tocada: sin sub federado y con contraseña viva
+    assert _auth.obtener_por_sso("uid-federado-42") is None
+    assert _auth.verificar_credenciales("maria.lopez", "ClaveLocalMuya1!")
+
+
+def test_sso_vinculacion_manual_admin(idp_oidc, monkeypatch) -> None:
+    """El enlace explícito del admin reemplaza al auto-enlace por homonimia."""
+    _auth.crear_operador("maria.lopez", "ClaveLocalMuya1!", "operador")
+    _auth.crear_operador("otra.cuenta", "ClaveLocalMuya2!", "lector")
+    _auth.vincular_sso_manual("maria.lopez", "uid-federado-42")
+    linked = _auth.obtener_por_sso("uid-federado-42")
+    assert linked["usuario"] == "maria.lopez"
+    assert linked["rol"] == "operador"
+    with pytest.raises(ValueError, match="enlazado"):
+        _auth.vincular_sso_manual("otra.cuenta", "uid-federado-42")
+    with pytest.raises(ValueError, match="no existe"):
+        _auth.vincular_sso_manual("fantasma", "otro-sub")
 
 
 def test_sso_rechaza_firma_tocada_y_state_ajeno(idp_oidc) -> None:

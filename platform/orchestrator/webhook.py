@@ -36,6 +36,7 @@ import ipaddress
 import json
 import os
 import secrets
+import socket
 import sqlite3
 import threading
 import time
@@ -59,27 +60,47 @@ EVENTOS: tuple[str, ...] = (
 
 # Redes de metadatos de nube vetadas como receptor (SSRF): el webhook es
 # una configuración de admin, pero el límite link-local es defense-in-depth.
-# z3 (auditoría seguridad): lista ampliada y por IP LITERAL (ipaddress), no
-# por prefijo de texto — "169.254." no atrapaba 0xA9.0xFE..., ni los
-# metadatos de Alibaba (100.100.100.200) u Oracle (192.0.0.192). El loopback
-# se PERMITE (receptor n8n/lab en el mismo host es uso legítimo on-prem).
-# Escape para despliegues con receptores en redes de metadatos (no debería
+# Redes de metadatos de nube vetadas como receptor (SSRF): el webhook es
+# una configuración de admin, pero el límite link-local es defense-in-depth.
+# z3 (auditoría): vetado por IP LITERAL (ipaddress), no por prefijo de texto
+# — "169.254." no atrapaba 0xA9.0xFE..., ni los metadatos de Alibaba
+# (100.100.100.200) u Oracle (192.0.0.192). El loopback se PERMITE (receptor
+# n8n/lab en el mismo host es uso legítimo on-prem). Escape documentado para
+# despliegues excepcionales con receptores en redes de metadatos (no debería
 # existir): WEBHOOK_PERMITIR_METADATOS=1.
-_HOSTS_VETADOS = {"metadata.google.internal", "metadata.goog"}
-_REDES_METADATOS = tuple(ipaddress.ip_network(r) for r in (
-    "169.254.0.0/16",       # link-local: AWS/GCP/Azure IMDS
-    "fd00:ec2::254/128",    # AWS IMDS IPv6
-    "100.100.100.200/32",   # Alibaba Cloud IMDS
-    "192.0.0.192/32",       # Oracle Cloud IMDS
-))
+# z2 (ronda 1-2): el veto se aplica en CUATRO capas — nombre textual, IP
+# directa en formas alternativas (decimal 2852039166, hex 0xA9FEA9FE, IPv6
+# mapeado ::ffff:169.254.169.254), IP RESUELTA por DNS en el ALTA y de nuevo
+# en el DESPACHO (el DNS pudo cambiar entre alta y entrega: rebinding — y el
+# canal heredado WEBHOOK_URL nunca pasó por validar_url).
+_HOSTS_VETADOS = {
+    "metadata.google.internal",
+    "metadata.goog",
+    "metadata.azure.internal",
+    "metadata.oraclecloud.com",
+}
+_REDES_VETADAS = tuple(
+    ipaddress.ip_network(r) for r in (
+        "169.254.0.0/16",       # link-local: AWS/GCP/Azure IMDS
+        "fe80::/10",            # link-local IPv6
+        "fd00:ec2::254/128",    # AWS IMDS IPv6
+        "100.100.100.200/32",   # Alibaba Cloud IMDS
+        "192.0.0.192/32",       # Oracle Cloud IMDS
+    )
+)
 
 
-def _es_ip_metadatos(host: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(ip in red for red in _REDES_METADATOS)
+def _ip_vetada(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True si la IP es link-local o de metadatos de nube."""
+    if ip.version == 6 and ip.ipv4_mapped:  # ::ffff:a9fe:a9fe → 169.254.169.254
+        ip = ip.ipv4_mapped
+    return ip.is_link_local or any(ip in red for red in _REDES_VETADAS)
+
+
+def _veto_metadatos_activo() -> bool:
+    """Escape documentado (z3): WEBHOOK_PERMITIR_METADATOS=1 desactiva el
+    veto para despliegues excepcionales. Por defecto el veto está ON."""
+    return os.environ.get("WEBHOOK_PERMITIR_METADATOS", "") != "1"
 
 
 MAX_ENTREGAS = 500  # poda del registro de entregas por despliegue
@@ -127,12 +148,52 @@ def _conexion() -> sqlite3.Connection:
 
 # --- validación -------------------------------------------------------------
 
+def _veto_por_resolucion(host: str) -> None:
+    """Veto anti-SSRF por IP (directa o resuelta). Lanza ValueError.
+
+    Capas compartidas por el ALTA (validar_url) y el DESPACHO (_entregar):
+    1. nombre textual de metadatos (rápido, sin red);
+    2. el host ES una IP vetada en forma alternativa (decimal, hex, octal,
+       IPv6 mapeada — urlparse NO la normaliza; la resolución sí);
+    3. resolución DNS real — el nombre podía ocultar una IP link-local.
+    Un host aún no resoluble se admite: no puede alcanzar metadatos y la
+    entrega fallará de forma natural (registrada en el historial).
+    Escape documentado (z3): WEBHOOK_PERMITIR_METADATOS=1 desactiva el veto.
+    """
+    if not _veto_metadatos_activo():
+        return
+    host_l = (host or "").lower().rstrip(".")
+    if host_l in _HOSTS_VETADOS:
+        raise ValueError("receptor no permitido: endpoints de metadatos de nube vetados")
+    try:
+        ip_directa = ipaddress.ip_address(host_l)
+    except ValueError:
+        ip_directa = None
+    if ip_directa is not None and _ip_vetada(ip_directa):
+        raise ValueError("receptor no permitido: endpoints de metadatos de nube vetados")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _ip_vetada(ip):
+            raise ValueError(
+                "receptor no permitido: el host resuelve a una IP de "
+                "metadatos de nube (link-local vetada)")
+
+
 def validar_url(url: str) -> str:
     """Valida la URL del receptor y la devuelve normalizada (str.strip).
 
-    Exige http/https y host; veta los endpoints de metadatos de nube
-    (por nombre e IP literal). Lanza ValueError con mensaje accionable
-    (el endpoint lo traduce a 422)."""
+    Exige http/https y host; veta los endpoints de metadatos de nube por
+    nombre Y por IP directa y resuelta (un chequeo solo textual era
+    saltable con formas alternativas de la misma IP). Lanza ValueError
+    con mensaje accionable (el endpoint lo traduce a 422).
+    """
     limpio = (url or "").strip()
     partes = urlparse(limpio)
     if partes.scheme not in ("http", "https"):
@@ -140,10 +201,7 @@ def validar_url(url: str) -> str:
     host = partes.hostname or ""
     if not host:
         raise ValueError("la URL necesita un host (p. ej. https://n8n.interno/webhook)")
-    if os.environ.get("WEBHOOK_PERMITIR_METADATOS", "") != "1":
-        if (host.lower() in _HOSTS_VETADOS or _es_ip_metadatos(host)):
-            raise ValueError(
-                "receptor no permitido: endpoints de metadatos de nube vetados")
+    _veto_por_resolucion(host)
     return limpio
 
 
@@ -306,9 +364,16 @@ def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
         }
         cabeceras = {k: v for k, v in cabeceras.items() if v}
         resultado = _post(url, cuerpo, cabeceras)
-        if resultado["ok"] or (resultado["http"] or 0) < 500:
-            break  # éxito, 4xx del receptor o respuesta firme: no reintentar
-        time.sleep(2.0)
+        # Contrato documentado: reintentar UNA vez ante 5xx O ERROR DE RED.
+        # Antes, un error de red (http=None) entraba por (None or 0) < 500
+        # y se ROMPIA el bucle: el reintento estaba muerto y un blip de red
+        # perdía el evento en silencio (incluido aprobacion.solicitada).
+        reintentable = (resultado["http"] is None
+                        or (resultado["http"] or 0) >= 500)
+        if resultado["ok"] or not reintentable:
+            break  # éxito o respuesta firme del receptor (4xx): no reintentar
+        if intento < 2:
+            time.sleep(2.0)  # solo si queda un intento: no dormir en balde
     _registrar_entrega(webhook_id, evento, engagement_id,
                        resultado["ok"], resultado["http"],
                        resultado["error"], intentos)

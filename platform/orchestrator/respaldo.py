@@ -56,7 +56,12 @@ def construir_respaldo_completo(raiz_casos: Path,
         if ruta_usuarios.exists():
             pendientes.append((ruta_usuarios, "usuarios.db"))
         if raiz_casos.exists():
-            for bd in sorted(raiz_casos.glob("caso_*.db")):
+            # *.db (misma clase que el resto del sistema: listar, CTEM,
+            # buscador de casos). El patrón caso_*.db dejaba FUERA del
+            # respaldo a las BDs de identificadores antiguos/demos que la
+            # API sí sirve: el manifiesto contaba N bases y la restauración
+            # perdía silenciosamente los demás casos.
+            for bd in sorted(raiz_casos.glob("*.db")):
                 pendientes.append((bd, bd.name))
 
         for origen, nombre in pendientes:

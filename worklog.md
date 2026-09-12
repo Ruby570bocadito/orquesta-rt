@@ -669,3 +669,26 @@ Stage Summary:
 - vLLM sin auth y el intel del lab ya no quedan a la escucha en todas las interfaces.
 - El paquete purple es determinista ante hallazgos homónimos y el informe markdown vuelve a citar ATT&CK como el HTML.
 - Documentación del agente reorganizada en docs/agentes/agente-z3/ (todas las auditorías juntas, una por sesión).
+---
+---
+Task ID: 24 (Z2-ronda-1)
+Agent: Z2 (pulimiento de funciones y mecánicas)
+Task: Misión continua de pulimiento: auditoría de mecánicas del núcleo, corrección de defectos verificados y documentación en docs/agentes/z2.md.
+
+Work Log:
+- LECTURA de worklog y docs previos (v1→v23) + suite completa ANTES de tocar nada: 295 passed / 8 skipped.
+- AUDITORÍA: barrido del backend (orchestrator/, integraciones/, mcp/) + verificación manual de cada hallazgo. 15 defectos concretos (fail-open, TOCTOU, carreras, contratos incumplidos, TLS con credenciales, env divergente).
+- BOUNDARY (guardrails/models/razonador): ventana horaria fail-CLOSED + validación HH:MM/días en el modelo (422 accionable); ventanas que cruzan medianoche soportadas (herencia del día inicial), mismas reglas en _ventana_abierta; techo de ruido sin la exención arbitraria ruido>30 (todo ruido cuenta), margen documentado _MARGEN_TECHO_RUIDO=5 y aviso al cruzar el nivel pactado; condición muerta del motivo "no catalogada" corregida (lee el spec).
+- CUSTODIA (memory.py): guardar_evidencia con BEGIN IMMEDIATE (adiós a las "rupturas de encadenamiento" falsas por escritura concurrente); encadenado/verificación por ROWID (el orden creado_en era frágil bajo concurrencia — hallado por el nuevo test de 8 hilos); dedup de hallazgos devuelve la ORIGINAL (adiós a ids fantasma en webhooks); cifrado_reposo → clave_hmac_activa (honesto: CLAVE_CASO firma HMAC, no cifra la BD).
+- WEBHOOKS: reintento ante error de red reparado (contrato documentado lo exigía); sin sleep residual; SSRF en 3 capas (nombres de metadatos ampliados + IP directa normalizada + IP resuelta por DNS; receptores del lab en 127.0.0.1 intactos).
+- PLANIFICADOR CTEM: TypeError (timestamp naive) capturado — antes mataba TODO el barrido en silencio para siempre; claim atómico del programa (adiós a corridas duplicadas por ticks solapados); cadena desconocida se cancela con warning (antes giraba en falso eterno); logging del bucle en api.py.
+- API/AUTH: decidir() con aislamiento multi-tenant y carrera de decisión resuelta (RETURNING; perdedor 404 sin auditoría fantasma); /api/salud usa auth.RUTA_DB (env DB_USUARIOS era errónea: "degradado" falso en producción); /api/auth/operadores solo admin (cross-tenant de metadatos); SSO seguro por defecto (la homonimia ya NO enlaza cuentas: flag SSO_VINCULAR_POR_NOMBRE=1 o endpoint admin POST /api/auth/sso/vincular, auditado) — cierra la toma de cuenta por preferred_username.
+- INTEGRACIONES/RESPALDO/HIGIENE: TLS verificado por defecto en metasploit/mythic/bloodhound (opt-out *_TLS_VERIFICAR=0; transportes/MCP intactos: lab sin credenciales); respaldo con glob *.db (las BDs de ids antiguos ya no se pierden); sidecar con with open.
+- TESTS (+30): test_v24_z2.py (28) + 2 en test_v21 + ajuste en test_razonador. Cubren cada defecto como contrato, incluida concurrencia real de custodia y claim del planificador.
+- VALIDACIÓN: 325 passed / 8 skipped (0 fallos), tsc 0, eslint 0, smoke en vivo /api/salud → ok. Fragilidad detectada y mitigada: limitador de login compartido en el proceso de tests (fixture Z2 con limitador fresco).
+- DOCUMENTACIÓN: docs/agentes/z2.md (registro completo de la ronda, notas de despliegue y propuestas para la siguiente ronda).
+
+Stage Summary:
+- Las mecánicas que definen el producto (boundary ROE, cadena de custodia, planificador continuo, webhooks firmados, SSO/RBAC) quedan alineadas con sus contratos documentados y libres de las carreras/fail-open hallados; cada corrección lleva su test.
+- Despliegue: si usabas vinculación SSO por nombre, activa SSO_VINCULAR_POR_NOMBRE=1 o usa el nuevo endpoint admin; si tus C2/intel van con certificado autofirmado, define la var *_TLS_VERIFICAR=0 correspondiente.
+- Siguiente ronda propuesta (en docs/agentes/z2.md): fixture autouse para el limitador de login en tests, re-verificación SSRF en despacho, verificador de cadenas históricas tolerante, SQLCipher y panel del presupuesto de ruido.

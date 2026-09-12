@@ -91,22 +91,34 @@ CATALOGO: dict[str, dict[str, str]] = {
 
 
 def _ventana_abierta(roe: dict[str, Any], ahora: datetime | None = None) -> bool:
-    """¿Está la ventana activa del ROE abierta ahora mismo?"""
+    """¿Está la ventana activa del ROE abierta ahora mismo?
+
+    MISMAS reglas que el boundary (guardrails._en_ventana_horaria): si el
+    razonador y el boundary divergieran, el plan propondría trabajo que el
+    boundary denegaría (o al revés). Formato inválido → fail-closed, y las
+    ventanas que cruzan medianoche (22:00→06:00) heredan el día del tramo
+    inicial en el tramo tras medianoche.
+    """
     ventana = roe.get("ventanas_activas") or {}
-    dias = ventana.get("dias") or []
-    inicio = str(ventana.get("inicio", "00:00"))
-    fin = str(ventana.get("fin", "23:59"))
+    dias_cfg = [str(d).lower() for d in (ventana.get("dias") or [])]
     t = ahora or datetime.now()
     nombres = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
-    dia = nombres[t.weekday()]
-    if dias and dia not in dias:
-        return False
     try:
-        hi = datetime.strptime(inicio, "%H:%M").time()
-        hf = datetime.strptime(fin, "%H:%M").time()
+        hi = datetime.strptime(str(ventana.get("inicio", "00:00")), "%H:%M").time()
+        hf = datetime.strptime(str(ventana.get("fin", "23:59")), "%H:%M").time()
     except ValueError:
-        return True
-    return hi <= t.time() <= hf
+        return False  # fail-closed: ventana indeterminada = actividad denegada
+    actual = t.time()
+    if hi > hf:
+        # Ventana nocturna que cruza medianoche.
+        if actual >= hi:
+            return not dias_cfg or nombres[t.weekday()] in dias_cfg
+        if actual < hf:
+            return not dias_cfg or nombres[(t.weekday() - 1) % 7] in dias_cfg
+        return False
+    if dias_cfg and nombres[t.weekday()] not in dias_cfg:
+        return False
+    return hi <= actual <= hf
 
 
 # ---------------------------------------------------------------------------

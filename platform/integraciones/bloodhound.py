@@ -49,10 +49,11 @@ def _config() -> tuple[str, str, str]:
 def _post_login(url: str, user: str, secret: str) -> str:
     """Login REAL: intercambia credenciales por token de sesión."""
     import httpx
-    # z3 (auditoría seguridad): el login transporta usuario+secret. TLS se
-    # verifica POR DEFECTO; BLOODHOUND_TLS_VERIFICAR=0 lo desactiva consciente.
-    verificar = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
-    with httpx.Client(timeout=20, verify=verificar) as c:
+    # z3 (auditoría) + z2 (ronda 1): el login transporta usuario+secret. TLS
+    # se verifica POR DEFECTO (patrón MISP). Opt-out explícito para
+    # instancias con certificado autofirmado: BLOODHOUND_TLS_VERIFICAR=0.
+    verificar_tls = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
+    with httpx.Client(timeout=20, verify=verificar_tls) as c:
         r = c.post(f"{url}/api/v2/login", json={
             "login_method": "secret", "username": user, "secret": secret,
             "totp": "",})
@@ -69,8 +70,8 @@ def _post_login(url: str, user: str, secret: str) -> str:
 
 def _get(url: str, token: str, ruta: str, params: dict[str, Any] | None = None) -> Any:
     import httpx
-    verificar = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
-    with httpx.Client(timeout=20, verify=verificar) as c:
+    verificar_tls = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
+    with httpx.Client(timeout=20, verify=verificar_tls) as c:
         r = c.get(f"{url}{ruta}", params=params or {},
                   headers={"Authorization": f"Bearer {token}"})
     if r.status_code != 200:
@@ -81,8 +82,8 @@ def _get(url: str, token: str, ruta: str, params: dict[str, Any] | None = None) 
 
 def _post_json(url: str, token: str, ruta: str, cuerpo: dict[str, Any]) -> Any:
     import httpx
-    verificar = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
-    with httpx.Client(timeout=25, verify=verificar) as c:
+    verificar_tls = os.environ.get("BLOODHOUND_TLS_VERIFICAR", "1") != "0"
+    with httpx.Client(timeout=25, verify=verificar_tls) as c:
         r = c.post(f"{url}{ruta}", json=cuerpo,
                    headers={"Authorization": f"Bearer {token}",
                             "Content-Type": "application/json"})

@@ -110,11 +110,44 @@ class TipoEvidencia(str, enum.Enum):
 
 
 class VentanaHoraria(BaseModel):
-    """Franja en la que está permitida la actividad activa (hora local)."""
+    """Franja en la que está permitida la actividad activa (hora local).
+
+    El formato de inicio/fin se valida AQUÍ (HH:MM estricto): una ventana
+    malformada que llegara al boundary se evaluaba fail-open (todo el
+    engagement sin control horario). La validación en el modelo cubre
+    creación AND actualización del ROE; el boundary conserva además un
+    fail-closed de defensa en profundidad para ROE legados en BD.
+    Una ventana que cruza medianoche (inicio > fin, p. ej. 22:00→06:00)
+    es válida y representa actividad nocturna.
+    """
 
     inicio: str = "08:00"
     fin: str = "20:00"
     dias: list[str] = Field(default_factory=lambda: ["lun", "mar", "mie", "jue", "vie"])
+
+    @field_validator("inicio", "fin")
+    @classmethod
+    def _validar_hora(cls, v: str) -> str:
+        import re as _re
+
+        if not _re.fullmatch(r"\d{1,2}:\d{2}", (v or "").strip()):
+            raise ValueError(
+                f"hora inválida: '{v}'. Formato esperado HH:MM (p. ej. 08:00)")
+        h, m = (int(x) for x in v.split(":"))
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError(
+                f"hora fuera de rango: '{v}' (0<=HH<=23, 0<=MM<=59)")
+        return f"{h:02d}:{m:02d}"
+
+    @field_validator("dias")
+    @classmethod
+    def _validar_dias(cls, v: list[str]) -> list[str]:
+        validos = {"lun", "mar", "mie", "jue", "vie", "sab", "dom"}
+        for d in v:
+            if d.lower() not in validos:
+                raise ValueError(
+                    f"día inválido: '{d}'. Válidos: lun mar mie jue vie sab dom")
+        return [d.lower() for d in v]
 
 
 class ROEPolitica(BaseModel):

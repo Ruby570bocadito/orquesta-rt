@@ -31,6 +31,7 @@ from .models import (
     Objetivo,
     ResumenFase,
     ROEPolitica,
+    Severidad,
     UsoTokens,
 )
 
@@ -377,24 +378,43 @@ class MemoriaCaso:
             ev.hash_sha256 = hashlib.sha256(ev.contenido.encode()).hexdigest()
         if not ev.firma_hmac:
             ev.firma_hmac = self._firma(ev.hash_sha256)
-        ultimo = self._conn.execute(
-            "SELECT hash_sha256 FROM evidencias WHERE engagement_id=? "
-            "ORDER BY creado_en DESC, rowid DESC LIMIT 1",
-            (ev.engagement_id,),
-        ).fetchone()
-        ev.hash_previo = ultimo["hash_sha256"] if ultimo else "genesis"
-        self._conn.execute(
-            "INSERT INTO evidencias VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ev.id, ev.engagement_id, ev.tipo.value, ev.titulo, ev.contenido,
-             ev.hash_sha256, ev.firma_hmac, ev.hash_previo, ev.fase.value,
-             ev.actor.value, ev.hallazgo_id, _ts(ev.creado_en)),
-        )
-        self._conn.commit()
+        # BEGIN IMMEDIATE: serializa la lectura del último hash con el INSERT
+        # en una transacción de escritura. Antes el SELECT-then-INSERT iba sin
+        # transacción: dos escritores concurrentes (corrida CTEM + arsenal,
+        # p. ej.) leían el MISMO hash_previo, insertaban dos eslabones
+        # hermanos y verificar_cadena reportaba "ruptura de encadenamiento"
+        # FALSA — una alarma de integridad que enmascaraba manipulaciones
+        # verdaderas en el mecanismo central del producto.
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            # El último eslabón se busca por ROWID (orden REAL de inserción,
+            # el mismo que BEGIN IMMEDIATE serializa). Ordenar por creado_en
+            # era frágil bajo concurrencia: la evidencia B pudo CREARSE
+            # (reloj del modelo) antes que la A y confirmarse DESPUÉS —
+            # quedaba antes en la lectura y la cadena daba por rota.
+            ultimo = self._conn.execute(
+                "SELECT hash_sha256 FROM evidencias WHERE engagement_id=? "
+                "ORDER BY rowid DESC LIMIT 1",
+                (ev.engagement_id,),
+            ).fetchone()
+            ev.hash_previo = ultimo["hash_sha256"] if ultimo else "genesis"
+            self._conn.execute(
+                "INSERT INTO evidencias VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (ev.id, ev.engagement_id, ev.tipo.value, ev.titulo, ev.contenido,
+                 ev.hash_sha256, ev.firma_hmac, ev.hash_previo, ev.fase.value,
+                 ev.actor.value, ev.hallazgo_id, _ts(ev.creado_en)),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
         return ev
 
     def listar_evidencias(self, engagement_id: str) -> list[sqlite3.Row]:
+        # Por rowid: el orden de inserción ES el orden de la cadena —
+        # verificar_cadena y esta consulta deben recorrerla igual.
         return list(self._conn.execute(
-            "SELECT * FROM evidencias WHERE engagement_id=? ORDER BY creado_en, rowid",
+            "SELECT * FROM evidencias WHERE engagement_id=? ORDER BY rowid",
             (engagement_id,),
         ))
 
@@ -435,14 +455,18 @@ class MemoriaCaso:
         # id, se conserva la ORIGINAL (con su fecha, sus evidencias y su
         # estado de detección) y se descarta la copia.
         previa = self._conn.execute(
-            "SELECT id FROM hallazgos WHERE engagement_id=? "
+            "SELECT * FROM hallazgos WHERE engagement_id=? "
             "AND lower(titulo)=lower(?) AND COALESCE(activo,'')=COALESCE(?,'') "
             "AND severidad=? AND COALESCE(tecnica_mitre,'')=COALESCE(?,'') "
             "AND descripcion=? AND id<>? LIMIT 1",
             (h.engagement_id, h.titulo, h.activo, h.severidad.value,
              h.tecnica_mitre, h.descripcion, h.id)).fetchone()
         if previa is not None:
-            return h
+            # Se conserva la ORIGINAL: se devuelve reconstruida de BD para que
+            # el llamador (notificación webhook, custodia de evidencias)
+            # referencie un id REAL. Antes se devolvía la copia descartada: su
+            # id no existía en BD y los webhooks difundían hallazgos fantasma.
+            return self._hallazgo_de_fila(previa)
         # Columnas explícitas y PRESERVACIÓN del resultado de detección:
         # una re-guardada desde una copia de modelo obsoleta (valor por
         # defecto "pendiente") no puede borrar lo que el blue team ya
@@ -464,6 +488,20 @@ class MemoriaCaso:
         )
         self._conn.commit()
         return h
+
+    def _hallazgo_de_fila(self, fila: sqlite3.Row) -> Hallazgo:
+        """Reconstruye el modelo Hallazgo desde su fila en BD (dedup)."""
+        return Hallazgo(
+            id=fila["id"], engagement_id=fila["engagement_id"],
+            titulo=fila["titulo"], severidad=Severidad(fila["severidad"]),
+            tecnica_mitre=fila["tecnica_mitre"], activo=fila["activo"] or "",
+            descripcion=fila["descripcion"] or "",
+            recomendacion=fila["recomendacion"] or "",
+            estado=fila["estado"], deteccion=fila["deteccion"],
+            evidencias=json.loads(fila["evidencias_json"] or "[]"),
+            creado_por=Actor(fila["creado_por"]),
+            creado_en=datetime.fromisoformat(fila["creado_en"]),
+        )
 
     def marcar_deteccion(self, engagement_id: str, hallazgo_id: str,
                          deteccion: str) -> None:
@@ -625,7 +663,11 @@ class MemoriaCaso:
             "objetivos": _cuenta("SELECT COUNT(*) FROM objetivos WHERE engagement_id=?"),
             "resumenes": _cuenta("SELECT COUNT(*) FROM resumenes_fase WHERE engagement_id=?"),
             "tamano_db_bytes": tamano,
-            "cifrado_reposo": os.environ.get("CLAVE_CASO", "") != "",
+            # HONESTO: CLAVE_CASO alimenta la firma HMAC de evidencias, NO el
+            # cifrado en reposo de la BD (SQLite sin SQLCipher). Antes el campo
+            # "cifrado_reposo" afirmaba un cifrado que no existe — dato
+            # engañoso para la auditoría de cumplimiento del cliente.
+            "clave_hmac_activa": os.environ.get("CLAVE_CASO", "") != "",
         }
 
     # -- compaction -----------------------------------------------------------------

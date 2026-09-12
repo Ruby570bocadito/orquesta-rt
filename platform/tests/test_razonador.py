@@ -119,12 +119,14 @@ def test_prioridades_ruta_en_riesgo_pide_verificacion(tmp_path) -> None:
 
 def test_prioridades_ventana_cerrada_pospone_activos(tmp_path) -> None:
     memoria, eid = _caso(Path(tmp_path))
-    # ROE con ventana cerrada TODO el año: el trabajo intrusivo se pospone
+    # ROE con ventana cerrada TODO el año: el trabajo intrusivo se pospone.
+    # (inicio == fin → la franja nunca está activa; los días inválidos ya
+    # no se admiten: la validación del ROE los rechaza con 422 accionable)
     from orchestrator.models import VentanaHoraria
     fila = memoria.obtener_engagement(eid)
     roe = ROEPolitica.model_validate_json(fila["roe_json"])
-    roe.ventanas_activas = VentanaHoraria(inicio="03:00", fin="03:01",
-                                          dias=["ene"])  # nunca abierta
+    roe.ventanas_activas = VentanaHoraria(inicio="03:00", fin="03:00",
+                                          dias=[])  # nunca abierta
     memoria.actualizar_roe(eid, roe)
     salida = razonador.prioridades_siguientes(memoria, eid)
     assert salida["ventana_abierta"] is False

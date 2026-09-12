@@ -42,7 +42,8 @@ def asegurar_consola() -> bool:
         import os
         # ¿Hay ya un supervisor anotado y vivo?
         if os.path.exists(LOCK):
-            pid = int(open(LOCK).read().strip() or "0")
+            with open(LOCK, encoding="utf-8") as fh:
+                pid = int(fh.read().strip() or "0")
             try:
                 os.kill(pid, 0)
                 return True  # el supervisor existe: se está recuperando

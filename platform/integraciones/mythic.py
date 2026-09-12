@@ -65,11 +65,12 @@ def _config() -> tuple[str, str]:
 def _gql(consulta: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
     """POST GraphQL autenticado a la API oficial de Mythic."""
     url, token = _config()
+    # Verificación TLS por defecto (patrón MISP): por aquí viaja MYTHIC_TOKEN.
+    # Opt-out explícito para instancias con certificado autofirmado:
+    # MYTHIC_TLS_VERIFICAR=0.
+    verificar_tls = os.environ.get("MYTHIC_TLS_VERIFICAR", "1") != "0"
     import httpx
-    # z3 (auditoría seguridad): el token Mythic viaja en cada petición. TLS se
-    # verifica POR DEFECTO; MYTHIC_TLS_VERIFICAR=0 lo desactiva consciente.
-    verificar = os.environ.get("MYTHIC_TLS_VERIFICAR", "1") != "0"
-    with httpx.Client(timeout=20, verify=verificar) as c:
+    with httpx.Client(timeout=20, verify=verificar_tls) as c:
         r = c.post(f"{url}/graphql",
                    json={"query": consulta, "variables": variables or {}},
                    headers={"MythicToken": token,

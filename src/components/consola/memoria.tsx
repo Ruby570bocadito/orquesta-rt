@@ -213,10 +213,10 @@ export function VistaMemoria() {
               <dd className="font-mono text-xs text-zinc-300">SQLite por caso (WAL)</dd>
             </div>
             <div className="flex items-center justify-between gap-2">
-              <dt className="text-zinc-500">Cifrado en reposo</dt>
+              <dt className="text-zinc-500">Clave HMAC de evidencias</dt>
               <dd>
-                <Insignia tono={memoria?.cifrado_reposo ? "esmeralda" : "ambar"}>
-                  {memoria?.cifrado_reposo ? "CLAVE_CASO activa" : "clave por ruta (dev)"}
+                <Insignia tono={memoria?.clave_hmac_activa ? "esmeralda" : "ambar"}>
+                  {memoria?.clave_hmac_activa ? "CLAVE_CASO activa" : "clave por ruta (dev)"}
                 </Insignia>
               </dd>
             </div>

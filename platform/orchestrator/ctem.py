@@ -28,12 +28,15 @@ Disciplina anti-relleno (la misma de siempre):
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from . import threatled
+
+_logger = logging.getLogger("orquestador.ctem")
 
 # Intervalos de programación: CTEM razonable es diario o semanal; el mínimo
 # de 1 h evita bucles de medición sin valor y el máximo 720 h (30 días).
@@ -411,11 +414,21 @@ def programas_pendientes(raiz_casos: Path,
                                <= instante)
                 except ValueError:
                     vencida = True
+                except TypeError:
+                    # Timestamp naive (BD antigua/editada a mano) vs instante
+                    # aware: la comparación lanza TypeError. ANTES no se
+                    # capturaba y ABORTABA el barrido completo del despliegue;
+                    # el bucle de api.py lo tragaba sin logging y TODAS las
+                    # corridas programadas se omitían indefinidamente sin
+                    # rastro. Se marca vencida: ejecutar_corrida reprograma
+                    # con timestamp nuevo aware y el programa se autocura.
+                    vencida = True
                 if vencida:
                     pendientes.append({
                         "programa_id": f["id"],
                         "engagement_id": f["engagement_id"],
                         "cadena_id": f["cadena_id"],
+                        "proxima_corrida_en": f["proxima_corrida_en"],
                         "bd": str(db),
                     })
         finally:
@@ -426,8 +439,16 @@ def programas_pendientes(raiz_casos: Path,
 def ejecutar_pendientes(raiz_casos: Path,
                         ahora: Optional[datetime] = None) -> list[dict[str, Any]]:
     """Ejecuta TODAS las corridas vencidas del despliegue. Cada corrida es
+
     real (instantánea + delta + auditoría en su caso); los fallos de una BD
-    no detienen a las demás. Devuelve los resúmenes ejecutados."""
+    no detienen a las demás. Devuelve los resúmenes ejecutados.
+
+    Cada programa se RECLAMA atómicamente antes de ejecutarse (UPDATE
+    condicionado al valor leído de proxima_corrida_en): con ticks
+    solapados o más de un worker, solo uno gana el claim y la corrida no
+    se duplica. Un programa reclamado que falla queda con proxima NULL
+    (= vencida): se reintenta al siguiente tick sin quedar bloqueado.
+    """
     from .memory import MemoriaCaso  # import tardío
     resumenes: list[dict[str, Any]] = []
     for pend in programas_pendientes(raiz_casos, ahora=ahora):
@@ -436,15 +457,35 @@ def ejecutar_pendientes(raiz_casos: Path,
         except sqlite3.Error:
             continue
         try:
+            # Claim atómico del slot: solo el writer que actualice la fila
+            # con el valor leído ejecuta la corrida.
+            reclamado = memoria._conn.execute(
+                "UPDATE ctem_programas SET proxima_corrida_en=NULL "
+                "WHERE id=? AND activo=1 AND proxima_corrida_en IS ?",
+                (pend["programa_id"], pend["proxima_corrida_en"]),
+            ).rowcount
+            memoria._conn.commit()
+            if not reclamado:
+                continue  # otro tick/worker lo reclamó antes: no duplicar
             cadena = threatled.obtener(pend["cadena_id"])
             if cadena is None:
+                _logger.warning(
+                    "ctem: programa %s con cadena desconocida %s; se cancela",
+                    pend["programa_id"], pend["cadena_id"])
+                memoria._conn.execute(
+                    "UPDATE ctem_programas SET activo=0 WHERE id=?",
+                    (pend["programa_id"],))
+                memoria._conn.commit()
                 continue
             resumen = ejecutar_corrida(
                 memoria, pend["engagement_id"], cadena,
                 disparo="programada", operador="planificador_ctem",
                 ahora=ahora)
             resumenes.append(resumen)
-        except (sqlite3.Error, ValueError):
+        except (sqlite3.Error, ValueError) as exc:
+            _logger.warning(
+                "ctem: corrida programada falló para programa %s: %s",
+                pend["programa_id"], exc)
             continue
         finally:
             memoria.cerrar()

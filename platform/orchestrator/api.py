@@ -94,8 +94,13 @@ async def _lifespan(app: FastAPI):
             try:
                 await asyncio.get_running_loop().run_in_executor(
                     None, ctem.ejecutar_pendientes, RAIZ_CASOS)
-            except Exception:
-                continue  # el planificador nunca tumba la API
+            except Exception as exc:
+                # El planificador nunca tumba la API, pero un fallo NO se
+                # traga en silencio: si el barrido muere de forma repetida
+                # (BD bloqueada, disco lleno…) el operador necesita verlo.
+                logging.getLogger("orquestador.ctem").warning(
+                    "bucle CTEM: fallo del barrido de programas: %s", exc)
+                continue
 
     _tarea_ctem = asyncio.create_task(_bucle_ctem())
     try:
@@ -480,7 +485,11 @@ def salud(request: Request) -> dict[str, Any]:
             "detalle": str(RAIZ_CASOS),
         },
         "operadores": {
-            "ok": Path(os.environ.get("DB_USUARIOS", "usuarios.db")).exists(),
+            # Misma ruta que usa auth.RUTA_DB (USUARIOS_DB): antes se leía
+            # DB_USUARIOS (variable que nadie define) y en producción el
+            # healthcheck reportaba "degradado" para siempre porque miraba
+            # un usuarios.db relativo inexistente.
+            "ok": Path(str(auth.RUTA_DB)).exists(),
         },
         "router_ia": RouterModelos().estado_backends(),
     }
@@ -769,12 +778,17 @@ def decidir(aprobacion_id: str, p: PeticionDecision, request: Request) -> dict[s
     """Decisión de firma ROE. La identidad queda fijada por la sesión JWT:
     la auditoría refleja QUIÉN decidió de verdad, sin suplantaciones.
 
-    z3 (auditoría seguridad): aislamiento multi-tenant APLICADO AQUÍ. La ruta
-    /api/aprobaciones/{id}/decision no casa con _RE_ENGAGEMENT (el chequeo de
-    tenant del middleware no la cubre), así que un operador de la organización
-    A podía firmar/rechazar aprobaciones de un caso de la organización B
-    iterando ids (BOLA horizontal). Ahora solo se consideran casos de la
-    propia organización (admin: todos)."""
+    z3 (auditoría) + z2 (ronda 1): aislamiento multi-tenant APLICADO AQUÍ.
+    La ruta /api/aprobaciones/{id}/decision no casa con _RE_ENGAGEMENT (el
+    chequeo de tenant del middleware no la cubre), así que un operador de la
+    organización A podía firmar/rechazar aprobaciones de un caso de la
+    organización B iterando ids (BOLA horizontal). Ahora solo se consideran
+    casos de la propia organización (admin: todos); a otra organización el
+    caso le es 404-inexistente, no 403.
+    Además, decidir_aprobacion solo toca la fila SI sigue pendiente
+    (WHERE estado='pendiente'): con dos operadores decidiendo a la vez, el
+    perdedor obtiene un 404 limpio SIN auditoría ni webhook fantasma.
+    """
     identidad = operador_de(request)
     admin = es_admin(request)
     tenant = tenant_de(request)
@@ -790,8 +804,25 @@ def decidir(aprobacion_id: str, p: PeticionDecision, request: Request) -> dict[s
                     continue
             pendientes = memoria.listar_aprobaciones(db.stem, solo_pendientes=True)
             if any(a["id"] == aprobacion_id for a in pendientes):
+                if not admin:
+                    caso_tenant = _tenant_de_caso(db.stem)
+                    if caso_tenant is None or caso_tenant != tenant:
+                        memoria.cerrar()
+                        # 404, no 403: a otra organización el caso le es
+                        # inexistente (misma respuesta que el middleware).
+                        raise HTTPException(
+                            404, "aprobación no encontrada o ya decidida")
                 from .models import Actor
-                memoria.decidir_aprobacion(aprobacion_id, p.decidir, identidad, p.comentario)
+                # decidir_aprobacion solo toca la fila SI sigue pendiente
+                # (WHERE estado='pendiente' RETURNING *): con dos operadores
+                # decidiendo a la vez, el perdedor obtiene None y NO genera
+                # auditoría ni webhook de una decisión que no ocurrió.
+                fila = memoria.decidir_aprobacion(
+                    aprobacion_id, p.decidir, identidad, p.comentario)
+                if fila is None:
+                    memoria.cerrar()
+                    raise HTTPException(
+                        404, "aprobación no encontrada o ya decidida")
                 memoria.registrar_auditoria(
                     db.stem, Actor.HUMANO, "aprobacion.decision",
                     detalle=(f"{'Aprobada' if p.decidir else 'Rechazada'}: {aprobacion_id} "
@@ -807,7 +838,8 @@ def decidir(aprobacion_id: str, p: PeticionDecision, request: Request) -> dict[s
                      "decision": "aprobada" if p.decidir else "rechazada",
                      "operador": identidad})
                 memoria.cerrar()
-                return {"id": aprobacion_id, "estado": "aprobada" if p.decidir else "rechazada"}
+                return {"id": aprobacion_id,
+                        "estado": "aprobada" if p.decidir else "rechazada"}
             memoria.cerrar()
     raise HTTPException(404, "aprobación no encontrada o ya decidida")
 
@@ -2235,7 +2267,13 @@ def auth_contrasena(p: PeticionContrasena, request: Request) -> dict[str, Any]:
 
 @app.get("/api/auth/operadores")
 def auth_operadores(request: Request) -> list[dict[str, Any]]:
-    """Listado de cuentas autenticadas (sin material sensible)."""
+    """Listado de cuentas autenticadas (sin material sensible). SOLO ADMIN:
+    la vista Equipo de la consola ya está reservada a admin — el backend lo
+    era TODO menos este endpoint, y un lector recibía las cuentas de TODAS
+    las organizaciones (divulgación cross-tenant de metadatos de usuarios,
+    además de la materia prima para suplantar vinculaciones SSO)."""
+    if not es_admin(request):
+        raise HTTPException(403, "Solo un operador admin puede listar cuentas.")
     return auth.listar_operadores()
 
 
@@ -2368,6 +2406,32 @@ def auth_sso_callback(request: Request) -> dict[str, Any]:
     auth.registrar_auditoria_sistema(
         cuenta["usuario"], "sso.login", "Login federado OIDC verificado")
     return {**cuenta, **token}
+
+
+class PeticionSsoVincular(BaseModel):
+    """Vinculación manual de una identidad federada a una cuenta local."""
+    usuario: str = Field(min_length=3, max_length=32)
+    sso_sub: str = Field(min_length=1, max_length=256)
+
+
+@app.post("/api/auth/sso/vincular")
+def auth_sso_vincular(p: PeticionSsoVincular, request: Request) -> dict[str, Any]:
+    """ENLACE EXPLÍCITO admin: asocia el sub federado del IdP a una cuenta
+    local existente. Sustituye al auto-enlace por homonimia (un federado
+    podía apropiarse de una cuenta eligiendo su preferred_username). El
+    admin asume que la identidad del IdP corresponde a esa cuenta; la
+    decisión queda auditada con su identidad real."""
+    if not es_admin(request):
+        raise HTTPException(
+            403, "Solo un operador admin puede vincular identidades federadas.")
+    try:
+        resultado = auth.vincular_sso_manual(p.usuario, p.sso_sub)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    auth.registrar_auditoria_sistema(
+        operador_de(request), "sso.vincular",
+        f"{p.usuario} ← sub {p.sso_sub[:24]}…")
+    return resultado
 
 
 # ---------------------------------------------------------------------------
