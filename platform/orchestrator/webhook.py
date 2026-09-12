@@ -645,6 +645,70 @@ def entregas_24h_por_receptor() -> dict[str, dict[str, int]]:
             for f in filas}
 
 
+def salud_receptores() -> dict[str, dict[str, Any]]:
+    """z2 (ronda 10): salud DERIVADA por receptor, no solo métricas.
+
+    Propuesta de la sesión 05 (cinco rondas en cola): con entregas_24h y
+    fallos_24h el admin veía actividad, pero seguía sin ver la pregunta
+    operacional de verdad: ¿este canal funciona AHORA? El estado se deriva
+    del RESULTADO DE LA ÚLTIMA entrega retenida:
+
+        "sano"         la última entrega fue exitosa (canal respondió)
+        "con_fallos"   la última entrega falló (roto desde entonces,
+                       haya éxitos previos o no)
+        "sin_entregas" cero entregas registradas (nunca se probó)
+
+    Criterios operacionales decididos y documentados:
+
+    - La ÚLTIMA fila manda: un fallo seguido de éxito es un canal
+      recuperado ("sano") — el fallo histórico queda en el historial y en
+      fallos_24h, no se criminaliza; un éxito seguido de fallo es un canal
+      caído ("con_fallos") aunque el día haya tenido éxitos.
+    - La poda (MAX_ENTREGAS_RECEPTOR/MAX_PINGS_RECEPTOR/MAX_ENTREGAS)
+      conserva siempre las últimas filas: la última entrega JAMÁS se poda,
+      así que el estado no puede inventarse por retención.
+    - Los pings de prueba (webhook.prueba) y los reenvíos manuales (ronda 9)
+      son POSTs reales al receptor y cuentan como última entrega: un ping
+      que responde demuestra el canal y un reenvío exitoso lo recupera.
+    - NO hay estado "muerto por silencio": un receptor suscrito solo a
+      roe.parada_emergencia puede pasar meses sin dispararse y seguir
+      estando PERFECTAMENTE sano. El silencio se publica como HECHO
+      (ultima_entrega) y la vista lo presenta como información — el
+      juicio de "esto está muerto" lo firma un humano, no un umbral.
+
+    Devuelve por webhook_id: {"estado", "ultima_entrega", "ultimo_exito",
+    "ultimo_fallo"} (timestamps ISO o None). El canal heredado "entorno"
+    sale del mismo GROUP BY: mismo registro, misma salud.
+    """
+    try:
+        with _conexion() as conn:
+            filas = conn.execute(
+                "WITH ordenadas AS ("
+                "  SELECT webhook_id, ok, creado_en,"
+                "         ROW_NUMBER() OVER (PARTITION BY webhook_id"
+                "                            ORDER BY creado_en DESC, id DESC)"
+                "           AS rn"
+                "  FROM webhook_entregas"
+                ")"
+                "SELECT webhook_id,"
+                "       MAX(CASE WHEN rn=1 THEN ok END) AS ultima_ok,"
+                "       MAX(CASE WHEN rn=1 THEN creado_en END) AS ultima_entrega,"
+                "       MAX(CASE WHEN ok=1 THEN creado_en END) AS ultimo_exito,"
+                "       MAX(CASE WHEN ok=0 THEN creado_en END) AS ultimo_fallo"
+                " FROM ordenadas GROUP BY webhook_id").fetchall()
+    except sqlite3.Error:
+        return {}
+    salud: dict[str, dict[str, Any]] = {}
+    for f in filas:
+        salud[f["webhook_id"]] = {
+            "estado": "sano" if f["ultima_ok"] == 1 else "con_fallos",
+            "ultima_entrega": f["ultima_entrega"],
+            "ultimo_exito": f["ultimo_exito"],
+            "ultimo_fallo": f["ultimo_fallo"],
+        }
+    return salud
+
+
 def probar_webhook(webhook_id: str) -> dict[str, Any]:
     """Ping REAL de prueba (sincrónico: el operador ve el resultado ahora)."""
     with _conexion() as conn:

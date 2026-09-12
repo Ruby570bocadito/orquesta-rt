@@ -35,6 +35,7 @@ nunca se borra ni se edita el .md de otro agente).
 | 06 | [sesion-06-ronda-7.md](sesion-06-ronda-7.md) | 7 | Búsqueda: el fragmento ya localiza la coincidencia que BM25 puntuó (misma tolerancia a tildes que el índice, gemelo normalizado 1:1) — antes una consulta acentuada mostraba la cabecera del documento en vez del pasaje relevante. |
 | 07 | [sesion-07-ronda-8.md](sesion-07-ronda-8.md) | 8 | Búsqueda: el término buscado se REALZA sobre el fragmento — el backend entrega las posiciones exactas (`coincidencias`, mismo gemelo 1:1 de la ronda 7) y la vista Memoria pinta `<mark>`; contrato backend↔frontend a prueba de deriva, suspensivo incluido. |
 | 08 | [sesion-08-ronda-9.md](sesion-08-ronda-9.md) | 9 | Reenvío manual de entregas webhook fallidas: la carga original viaja en la propia fila (migración idempotente), `POST …/entregas/{id}/reenviar` dispara una entrega real nueva con la config ACTUAL del receptor, el historial expone id/reenviable/reenvio_de y la UI suma botón + chip; cinco negaciones honestas con test. |
+| 09 | [sesion-09-ronda-10.md](sesion-09-ronda-10.md) | 10 | Salud derivada por receptor en Webhooks (propuesta de la sesión 05): el estado sale del resultado de la ÚLTIMA entrega retenida — "sano"/"con_fallos"/"sin_entregas" + timestamps; el silencio se publica como hecho (insignia informativa "7+ días"), nunca como juicio de "muerto". Incluye restauración verificada de las rondas 8-9 tras la purga F32, órdenes #4 del director (instalación limpia, revisión de topes, plan MCP v2 en `plan-mcp-v2.md`) y badge 522→569. |
 
 ## Convenciones
 

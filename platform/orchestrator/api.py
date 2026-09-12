@@ -2913,16 +2913,26 @@ def webhooks_lista(request: Request) -> dict[str, Any]:
     z2 (ronda 6): cada receptor (y el canal heredado) lleva entregas_24h /
     fallos_24h — el receptor muerto se ve en la tarjeta sin abrir el
     desplegable del historial. Sin entregas la ventana cuenta CERO: no
-    inventa actividad."""
+    inventa actividad.
+    z2 (ronda 10): cada receptor (y el canal heredado) lleva además su
+    salud DERIVADA ("sano" | "con_fallos" | "sin_entregas" + timestamps
+    de la última entrega/éxito/fallo) — el estado se deriva del resultado
+    de la ÚLTIMA entrega retenida; el silencio se publica como hecho
+    (ultima_entrega), nunca como juicio de "muerto"."""
     _admin_webhooks(request)
     wh = _modulo_webhook()
     stats = wh.entregas_24h_por_receptor()
+    salud = wh.salud_receptores()
     cero = {"entregas_24h": 0, "fallos_24h": 0}
-    receptores = [{**r, **stats.get(r["id"], cero)}
+    sin_salud = {"estado": "sin_entregas", "ultima_entrega": None,
+                 "ultimo_exito": None, "ultimo_fallo": None}
+    receptores = [{**r, **stats.get(r["id"], cero),
+                   "salud": salud.get(r["id"], sin_salud)}
                   for r in wh.listar_webhooks()]
     canal = wh.canal_heredado_estado()
     if canal["activo"]:
-        canal = {**canal, **stats.get("entorno", cero)}
+        canal = {**canal, **stats.get("entorno", cero),
+                 "salud": salud.get("entorno", sin_salud)}
     return {"receptores": receptores, "eventos": list(wh.EVENTOS),
             "canal_heredado": canal}
 

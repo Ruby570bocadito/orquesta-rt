@@ -3,7 +3,7 @@
 ![CI](https://github.com/Ruby570bocadito/orquesta-rt/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![Tests](https://img.shields.io/badge/pytest-557%20tests-2EA043)
+![Tests](https://img.shields.io/badge/pytest-570%20tests-2EA043)
 ![Licencia](https://img.shields.io/badge/Licencia-propietaria%20on--prem-red)
 
 > Arquitectura agéntica completa para operaciones ofensivas **autorizadas**:

@@ -321,6 +321,16 @@ export interface CoberturaAttack {
 }
 
 // Webhooks de notificación operativa (v16)
+// z2-ronda-10: salud DERIVADA del receptor — el estado sale del resultado
+// de la ÚLTIMA entrega retenida (la poda jamás la borra). No existe el
+// estado "muerto por silencio": el silencio viaja como hecho (ultima_entrega)
+// y la vista lo presenta como información, nunca como alarma.
+export interface SaludReceptor {
+  estado: "sano" | "con_fallos" | "sin_entregas";
+  ultima_entrega: string | null;
+  ultimo_exito: string | null;
+  ultimo_fallo: string | null;
+}
 export interface ReceptorWebhook {
   id: string;
   url: string;
@@ -335,6 +345,8 @@ export interface ReceptorWebhook {
   // la tarjeta sin abrir el desplegable de entregas)
   entregas_24h?: number;
   fallos_24h?: number;
+  // z2-ronda-10: salud derivada (última entrega/éxito/fallo + estado)
+  salud?: SaludReceptor;
 }
 export interface EntregaWebhook {
   // z2-ronda-9: identificador de la fila — el asidero del reenvío manual
@@ -522,7 +534,7 @@ interface EstadoConsola {
   webhooks: ReceptorWebhook[] | null;
   eventosWebhook: string[];
   /** z2-ronda-4: canal heredado WEBHOOK_URL (no vive en la BD). */
-  canalHeredado: { activo: boolean; url: string; entregas_24h?: number; fallos_24h?: number } | null;
+  canalHeredado: { activo: boolean; url: string; entregas_24h?: number; fallos_24h?: number; salud?: SaludReceptor } | null;
   webhooksOcupado: boolean;
   // equipo (admin)
   operadores: OperadorCuenta[] | null;

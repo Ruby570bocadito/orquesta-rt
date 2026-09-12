@@ -131,10 +131,15 @@ export function Insignia({
   children,
   tono = "slate",
   className,
+  title,
 }: {
   children: React.ReactNode;
   tono?: "slate" | "esmeralda" | "ambar" | "rojo" | "teal" | "crimson";
   className?: string;
+  // z2-ronda-10: tooltip nativo — la salud derivada explica su estado
+  // (fechas de la última entrega/éxito/fallo) al pasar el ratón, sin
+  // ocupar espacio en la tarjeta.
+  title?: string;
 }) {
   const tonos = {
     slate: "bg-zinc-500/12 text-zinc-300 border-zinc-500/30",
@@ -146,6 +151,7 @@ export function Insignia({
   };
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
         tonos[tono],

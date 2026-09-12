@@ -19,7 +19,7 @@ import {
 import { Tarjeta, Insignia, TituloSeccion, Vacio } from "@/components/consola/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { usarConsola, EntregaWebhook } from "@/lib/store";
+import { usarConsola, EntregaWebhook, SaludReceptor } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const ETIQUETA_EVENTO: Record<string, string> = {
@@ -34,6 +34,53 @@ const ETIQUETA_EVENTO: Record<string, string> = {
   "ctem.corrida": "Corrida CTEM",
   "webhook.prueba": "Ping de prueba",
 };
+
+/** z2-ronda-10: insignia de SALUD DERIVADA del receptor — responde a la
+ *  pregunta operacional que las métricas 24 h no contestan: ¿este canal
+ *  funciona AHORA? El estado viene del backend (resultado de la ÚLTIMA
+ *  entrega retenida); el silencio NO es un estado: si la última entrega es
+ *  anterior a 7 días se muestra como información con la reserva explícita
+ *  de los eventos infrecuentes (p. ej. roe.parada_emergencia puede tardar
+ *  meses y el receptor seguir estando sano). En un receptor pausado el
+ *  silencio es el comportamiento esperado: no se señala. */
+const MS_7_DIAS = 7 * 24 * 60 * 60 * 1000;
+
+function InsigniaSalud({ salud, pausado }: { salud?: SaludReceptor; pausado?: boolean }) {
+  if (!salud) return null;
+  const fecha = (t: string | null) =>
+    t ? new Date(t).toLocaleString("es-ES") : "ninguno registrado";
+  let insignia: React.ReactNode = null;
+  if (salud.estado === "sano") {
+    insignia = (
+      <Insignia tono="esmeralda"
+        title={`Última entrega: ${fecha(salud.ultima_entrega)} · último éxito: ${fecha(salud.ultimo_exito)}`}>
+        último POST ok
+      </Insignia>
+    );
+  } else if (salud.estado === "con_fallos") {
+    insignia = (
+      <Insignia tono="rojo"
+        title={`Último fallo: ${fecha(salud.ultimo_fallo)} · último éxito: ${fecha(salud.ultimo_exito)}`}>
+        último POST falló
+      </Insignia>
+    );
+  } else {
+    insignia = <Insignia tono="slate">sin entregas todavía</Insignia>;
+  }
+  const enSilencio = salud.ultima_entrega != null
+    && (Date.now() - new Date(salud.ultima_entrega).getTime()) > MS_7_DIAS;
+  return (
+    <>
+      {insignia}
+      {enSilencio && !pausado && (
+        <Insignia tono="slate"
+          title={`Sin entregas desde ${fecha(salud.ultima_entrega)} — puede ser normal si solo está suscrito a eventos infrecuentes (p. ej. parada de emergencia)`}>
+          7+ días sin entregas
+        </Insignia>
+      )}
+    </>
+  );
+}
 
 /** Bloque de entregas compartido por receptores de BD y el canal heredado
  *  (z2-ronda-4): mismo registro, mismo formato — el receptor "entorno" es
@@ -340,6 +387,8 @@ export function SeccionWebhooks() {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100" title={w.url}>{w.url}</p>
                   <Insignia tono={w.activo ? "esmeralda" : "slate"}>{w.activo ? "activo" : "pausado"}</Insignia>
+                  {/* z2-ronda-10: salud derivada — ¿funciona el canal AHORA? */}
+                  <InsigniaSalud salud={w.salud} pausado={!w.activo} />
                   {/* z2-ronda-6: el receptor muerto se ve sin abrir el desplegable */}
                   {w.fallos_24h ? (
                     <Insignia tono="rojo">{w.fallos_24h} fallo{(w.fallos_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
@@ -414,6 +463,8 @@ export function SeccionWebhooks() {
                 {canalHeredado.url}
               </p>
               <Insignia tono="slate">canal heredado · WEBHOOK_URL</Insignia>
+              {/* z2-ronda-10: salud derivada también para el canal del entorno */}
+              <InsigniaSalud salud={canalHeredado.salud} />
               {canalHeredado.fallos_24h ? (
                 <Insignia tono="rojo">{canalHeredado.fallos_24h} fallo{(canalHeredado.fallos_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
               ) : canalHeredado.entregas_24h ? (
