@@ -7,11 +7,11 @@ import { motion } from "framer-motion";
 import { Check, Copy, FileSpreadsheet, Plus, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Tarjeta, Insignia, InsigniaSeveridad, TituloSeccion, Vacio, Entrada, FiltroSegmentado, copiarTexto } from "@/components/consola/ui";
-import { usarConsola, descargarCSVHallazgos } from "@/lib/store";
+import { usarConsola, descargarCSVHallazgos, validarSigmaCaso } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ETIQUETA_FASE, Severidad, formatoTokens } from "@/lib/tipos";
-import { CheckCircle2, FileSearch, Fingerprint, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CheckCircle2, FileSearch, Fingerprint, ShieldCheck, ShieldX, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ORDEN_SEVERIDAD: Record<Severidad, number> = { critica: 0, alta: 1, media: 2, baja: 3, informativa: 4 };
@@ -51,6 +51,112 @@ function TiraPurpleTeam({ hallazgos }: { hallazgos: import("@/lib/tipos").Hallaz
           <span className="text-zinc-500">sin verificar: {total - verificados.length}</span>
         </div>
       </div>
+    </Tarjeta>
+  );
+}
+
+/** Veredicto Sigma del caso (v25): validación estructural EN VIVO de los
+ *  esqueletos que entrega el paquete purple, consumiendo POST /sigma/validar
+ *  (mismo generador: ZIP y panel jamás divergen). El veredicto llega por
+ *  regla: errores bloquean el despliegue, avisos educan sin romper. */
+function PanelSigma() {
+  const casoActivo = usarConsola((s) => s.casoActivo);
+  const [veredicto, setVeredicto] = useState<import("@/lib/tipos").VeredictoSigma | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const validar = async () => {
+    if (!casoActivo || cargando) return;
+    setCargando(true);
+    setError(null);
+    try {
+      const v = await validarSigmaCaso(casoActivo);
+      setVeredicto(v);
+      toast({
+        title: v.total === 0 ? "Sin reglas Sigma que validar"
+          : `Validación Sigma: ${v.validas} de ${v.total} reglas válidas`,
+        description: v.total === 0
+          ? "Las técnicas con fuente de logs mapeada generarán las reglas"
+          : (v.invalidas === 0 ? "El lote puede desplegarse en el SIEM" : "Revise las reglas marcadas antes de desplegar"),
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <Tarjeta className="border-teal-500/20 bg-teal-500/[0.04]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-xl">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-teal-300/80">detection-as-code (Sigma)</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-zinc-300">
+            Verificación estructural de las reglas Sigma del caso ANTES de desplegarlas en el SIEM:
+            YAML parseable, logsource, condiciones y mapeo ATT&CK. La misma validación viaja dentro del
+            paquete purple (sigma/validacion.md).
+          </p>
+        </div>
+        <Button
+          variant="outline" size="sm"
+          className="h-8 gap-1.5 border-line bg-panel text-xs text-zinc-300 hover:bg-raised"
+          onClick={validar} disabled={cargando || !casoActivo}
+        >
+          {cargando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+          Validar reglas Sigma
+        </Button>
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-lg border border-crimson/40 bg-crimson/[0.08] px-3 py-2 font-mono text-[11px] text-red-200">
+          {error}
+        </p>
+      )}
+
+      {veredicto && !error && (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Insignia tono={veredicto.total === 0 ? "slate" : veredicto.invalidas === 0 ? "esmeralda" : "rojo"}>
+              {veredicto.validas} de {veredicto.total} reglas válidas
+            </Insignia>
+            <Insignia tono="slate">motor: {veredicto.motor}</Insignia>
+            {veredicto.sin_fuente.length > 0 && (
+              <Insignia tono="ambar">{veredicto.sin_fuente.length} técnica(s) sin fuente de logs</Insignia>
+            )}
+          </div>
+          {veredicto.reglas.map((r) => (
+            <div
+              key={r.nombre}
+              className={cn(
+                "rounded-lg border px-3 py-2",
+                r.valida ? "border-emerald-500/20 bg-emerald-500/[0.04]" : "border-crimson/40 bg-crimson/[0.06]",
+              )}
+            >
+              <p className="flex items-center gap-2 font-mono text-[11px] text-zinc-200">
+                {r.valida
+                  ? <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                  : <ShieldX className="h-3.5 w-3.5 shrink-0 text-red-300" />}
+                <span className="truncate" title={r.nombre}>{r.nombre}</span>
+              </p>
+              {r.errores.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5 pl-6 font-mono text-[10px] leading-relaxed text-red-300/90">
+                  {r.errores.map((e, i) => <li key={i}>error: {e}</li>)}
+                </ul>
+              )}
+              {r.avisos.length > 0 && (
+                <ul className="mt-1 space-y-0.5 pl-6 font-mono text-[10px] leading-relaxed text-amber-300/90">
+                  {r.avisos.map((a, i) => <li key={i}>aviso: {a}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+          {veredicto.sin_fuente.length > 0 && (
+            <p className="font-mono text-[11px] leading-relaxed text-zinc-500">
+              Sin fuente mapeada (no generan regla, política anti-invención): {veredicto.sin_fuente.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
     </Tarjeta>
   );
 }
@@ -259,6 +365,7 @@ export function VistaHallazgos() {
         }
       />
       <TiraPurpleTeam hallazgos={hallazgos} />
+      <PanelSigma />
       <FormularioHallazgo />
       {presentes.length > 1 && (
         <FiltroSegmentado

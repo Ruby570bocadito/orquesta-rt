@@ -1973,6 +1973,15 @@ export async function descargarPaquetePurpleTeam(id: string): Promise<string> {
   return a.download;
 }
 
+/** Validación Sigma en vivo (v25): veredicto por regla de los esqueletos
+ *  Sigma del caso, ANTES de que el operador los despliegue en su SIEM.
+ *  El backend usa el mismo generador que el ZIP purple (nunca divergen).
+ *  RBAC: nivel ≥2; el lector recibirá 403 con mensaje claro. */
+export async function validarSigmaCaso(id: string): Promise<import("./tipos").VeredictoSigma> {
+  return api<import("./tipos").VeredictoSigma>(
+    `/engagements/${id}/sigma/validar`, { method: "POST" });
+}
+
 /** Copia de seguridad completa del sistema (solo admin): BDs + manifiesto SHA-256. */
 export async function descargarRespaldoCompleto(): Promise<string> {
   const r = await fetch(`${BASE}/admin/respaldo-completo`, {
