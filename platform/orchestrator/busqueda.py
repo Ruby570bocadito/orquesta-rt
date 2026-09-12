@@ -121,19 +121,97 @@ def _normalizar_1a1(texto: str) -> str:
 
 def _fragmento(contenido: str, consulta: str, radio: int = 90) -> str:
     """Recorte contextual del contenido alrededor de la primera coincidencia
-    (con la MISMA tolerancia a tildes que el índice BM25)."""
-    contenido = (contenido or "").strip().replace("\n", " ")
-    if len(contenido) <= radio * 2:
-        return contenido
+    (con la MISMA tolerancia a tildes que el índice BM25).
+
+    Compatibilidad: la vista de memoria del copiloto (RAG) consume solo el
+    texto; la consola consume además las posiciones vía _fragmento_y_coincidencias.
+    """
+    return _fragmento_y_coincidencias(contenido, consulta, radio)[0]
+
+
+def _fragmento_y_coincidencias(
+        contenido: str, consulta: str, radio: int = 90) -> tuple[str, list[dict[str, int]]]:
+    """Recorte contextual + posiciones EXACTAS de las coincidencias dentro
+    del recorte devuelto.
+
+    (z2, ronda 8): la vista Memoria pinta el término buscado con realce.
+    Las posiciones se calculan aquí —fuente única de verdad de la
+    normalización tolerante a tildes (z2, ronda 7)— y viajan en la
+    respuesta; duplicar la lógica en TypeScript abriría una deriva
+    backend↔frontend del mismo tipo que la que esta carpeta caza.
+
+    Contrato del realce: `coincidencias` es una lista de pares
+    {inicio, fin} SEMIABIERTOS [inicio, fin) sobre el fragmento DEVUELTO
+    (con sus suspensivos incluidos, que nunca forman parte de una
+    coincidencia), ordenados y sin solapes — listos para
+    fragmento.slice(inicio, fin) en el frontend. Si el fragmento no
+    contiene ninguna coincidencia (p. ej. el resultado entró solo por la
+    vía semántica de embeddings, o el recorte es la cabecera por
+    ausencia de match), la lista viene VACÍA: la vista no inventa
+    realces que el índice no sostiene.
+    """
+    texto = (contenido or "").strip().replace("\n", " ")
+    if len(texto) <= radio * 2:
+        # El documento completo ya es visible: el realce cubre TODO lo
+        # que contiene (sin ventana que recorte nada).
+        return texto, _rangos_coincidencias(texto, consulta)
+
     terminos = tokenizar(consulta)
-    bajo = _normalizar_1a1(contenido)
+    bajo = _normalizar_1a1(texto)
+    primer_pos = -1
+    primer_len = 0
     for t in terminos:
         pos = bajo.find(t)
         if pos >= 0:
-            inicio = max(0, pos - radio)
-            fin = min(len(contenido), pos + radio)
-            return ("…" if inicio > 0 else "") + contenido[inicio:fin] + ("…" if fin < len(contenido) else "")
-    return contenido[: radio * 2] + "…"
+            primer_pos, primer_len = pos, len(t)
+            break
+    if primer_pos < 0:
+        # Sin coincidencia léxica: cabecera honesta, sin realces.
+        return texto[: radio * 2] + "…", []
+
+    inicio = max(0, primer_pos - radio)
+    # La primera coincidencia NUNCA queda cortada por la derecha (antes un
+    # término más largo que el radio se partía a la mitad del recorte).
+    fin = min(len(texto), max(primer_pos + radio, primer_pos + primer_len))
+    ventana = texto[inicio:fin]
+    prefijo = "…" if inicio > 0 else ""
+    sufijo = "…" if fin < len(texto) else ""
+    # El suspensivo inicial desplaza las posiciones de la ventana dentro del
+    # fragmento final (el de la derecha va al final: no afecta a nada previo).
+    desplazamiento = len(prefijo)
+    rangos = [
+        {"inicio": c["inicio"] + desplazamiento, "fin": c["fin"] + desplazamiento}
+        for c in _rangos_coincidencias(ventana, consulta)
+    ]
+    return prefijo + ventana + sufijo, rangos
+
+
+def _rangos_coincidencias(texto: str, consulta: str) -> list[dict[str, int]]:
+    """Todas las coincidencias de los términos de la consulta sobre `texto`,
+    con la MISMA tolerancia a tildes que el índice (gemelo normalizado 1:1).
+    Devuelve pares {inicio, fin} semiabiertos, ordenados, sin solapes (los
+    rangos que se solapan se FUNDEN — p. ej. «adm» dentro de una
+    «administracion» puntuada — para que el frontend pinte una sola marca
+    continua)."""
+    if not texto:
+        return []
+    bajo = _normalizar_1a1(texto)
+    bruto: list[list[int]] = []
+    for t in dict.fromkeys(tokenizar(consulta)):  # dedup conservando orden
+        pos = bajo.find(t)
+        while pos >= 0:
+            bruto.append([pos, pos + len(t)])
+            pos = bajo.find(t, pos + 1)
+    if not bruto:
+        return []
+    bruto.sort()
+    fundidos: list[list[int]] = [bruto[0]]
+    for ini, fin in bruto[1:]:
+        if ini <= fundidos[-1][1]:  # solapa o toca el borde interior
+            fundidos[-1][1] = max(fundidos[-1][1], fin)
+        else:
+            fundidos.append([ini, fin])
+    return [{"inicio": ini, "fin": fin} for ini, fin in fundidos]
 
 
 def _rrf(rangos: list[dict[str, float]], k: int = 60) -> dict[str, float]:
@@ -269,9 +347,14 @@ def buscar_caso(
         doc = por_id.get(clave)
         if not doc:
             continue
+        frag, coincidencias = _fragmento_y_coincidencias(doc.contenido, consulta)
         finales.append({
             "id": doc.id, "tipo": doc.tipo, "titulo": doc.titulo,
-            "fragmento": _fragmento(doc.contenido, consulta),
+            "fragmento": frag,
+            # Posiciones del realce sobre `fragmento` ([inicio, fin), sin
+            # solapes); vacía cuando el fragmento no contiene el término —
+            # contrato backend↔frontend fijado en test_v32_z2.py (ronda 8).
+            "coincidencias": coincidencias,
             "puntuacion": round(puntuacion, 5), "fase": doc.fase,
             "creado_en": doc.creado_en, "extra": doc.extra,
         })

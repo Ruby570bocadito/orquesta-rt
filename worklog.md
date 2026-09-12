@@ -859,6 +859,8 @@ Stage Summary:
 - Siguiente ronda propuesta (sesion-06): reenvío manual de entregas webhook fallidas (esquema), export Prometheus (cuarta ronda deferido: decidir o retirar), salud derivada por receptor, realce del término en la vista Memoria (trivial sobre el fragmento corregido).
 
 ---
+Task ID: 34 (z3-sesión-6)
+
 Task ID: 34 (Z-DIRECTOR-sesion-01)
 Agent: z-director (dirección y revisión del conjunto orquesta-rt)
 Task: Auditoría directiva independiente del proyecto (bitácoras de z1/z2/z3 + instalación limpia + estado remoto de GitHub), cierre del F32 (secreto JWT en el historial público) y de la CI roja, con bitácora propia en docs/agentes/z-director/.
@@ -914,3 +916,25 @@ Work Log:
 Stage Summary:
 - Total acumulado z3 → 36 fixes en 6 sesiones. El arsenal AD vuelve a estar operativo (asrep/dcsync), la compactación de fases es real y la clase de defecto "nombre indefinido" está protegida por test en toda la plataforma.
 - Pendiente de equipo (sin cambios): purga de historial git + rotación del secreto JWT de usuarios.db (F32); rotación del PAT de push.
+=======
+
+---
+Task ID: 36 (Z2-ronda-8)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 8 de pulimiento — realce del término de búsqueda en la vista Memoria (propuesta estrella de la sesión 06), construido sobre el fragmento corregido en la ronda 7. (Renumerado de 34 a 35 en el rebase: el ID 34 lo tomó antes z3-sesión-6 en main; rebase reconciliado sin debilitar ningún fix ajeno.)
+
+Work Log:
+- Base: main 8b98e97 (ronda 7 publicada). Línea base verificada: 522 passed / 8 skipped.
+- DECISIÓN DE DISEÑO: las posiciones del realce las calcula el BACKEND (fuente única de verdad de la normalización tolerante a tildes — el gemelo 1:1 de la ronda 7); duplicar la lógica en TypeScript sería la deriva backend↔frontend que esta carpeta caza. El frontend solo pinta.
+- AA1 (busqueda.py + memoria.tsx + store.ts): _fragmento_y_coincidencias() + _rangos_coincidencias() — todas las ocurrencias de todos los términos de la consulta sobre el fragmento, pares semiabiertos {inicio, fin} ordenados y sin solapes (solapados se FUNDEN: «adm» dentro de «administración» = una marca); buscar_caso añade "coincidencias" a cada resultado; ResultadoBusqueda gana el campo opcional (tolerante a backend antiguo); FragmentoConRealce pinta <mark> ámbar saneando rangos corruptos. Sin match léxico → lista vacía: la vista no inventa realces.
+- AA2: off-by-one del suspensivo inicial cazado POR EL TEST antes de publicar — el «…» inicial desplaza la ventana +1 dentro del fragmento final; sin compensar, el realce pintaba ' enumeració' en vez de 'enumeración' (verificado manualmente). Regresión fijada.
+- AA3: término más largo que el radio ya no queda partido por la ventana (fin = max(pos+radio, pos+len(t))).
+- AA4: contenido corto (≤ 2×radio) devuelve el documento entero CON rangos.
+- Compatibilidad: _fragmento() conserva firma (copiloto RAG y tests de la ronda 7 la consumen).
+- TESTS (+9, test_v32_z2.py): tolerancia a tildes en ambos sentidos, posiciones válidas con suspensivo inicial (regresión AA2), orden/sin solapes/fusión, primera coincidencia nunca cortada, sin match → vacío honesto, contenido corto, compatibilidad de firma, E2E con contrato de cable exacto (solo claves inicio/fin). 531 passed / 8 skipped, tsc 0, eslint 0.
+- DOCS: docs/agentes/z2/sesion-07-ronda-8.md + índice del README de la carpeta + z2.md (punta de rastro) actualizados; este registro.
+
+Stage Summary:
+- 531 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
+- El operador ve el término buscado realzado dentro del fragmento — lo que BM25 puntuó es exactamente lo que se marca, tildes incluidas.
+- Siguiente ronda propuesta (sesion-07): export Prometheus (quinta ronda deferido: decisión o retirada), reenvío manual de entregas fallidas (esquema de cargas), salud derivada por receptor, realce en títulos (marginal).

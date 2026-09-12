@@ -21,6 +21,57 @@ const ETIQUETA_TIPO_BUSQUEDA: Record<string, string> = {
   resumen: "Resumen",
 };
 
+/**
+ * Fragmento de búsqueda con el término REALZADO.
+ *
+ * Las posiciones las calcula el backend (busqueda.py, ronda z2-8) con la
+ * MISMA tolerancia a tildes que el índice BM25 — el frontend solo pinta:
+ * no reimprime la normalización (sería una deriva backend↔frontend más).
+ * Rangos semiabiertos [inicio, fin), sin solapes; inválidos o fuera de
+ * rango se ignoran (defensa ante datos corruptos, sin romper la vista).
+ */
+function FragmentoConRealce({ fragmento, coincidencias }: {
+  fragmento: string;
+  coincidencias?: { inicio: number; fin: number }[];
+}) {
+  const validas = useMemo(() => {
+    if (!coincidencias?.length) return [];
+    const n = fragmento.length;
+    const limpias = coincidencias
+      .map((c) => ({ inicio: Math.max(0, Math.floor(c.inicio)), fin: Math.min(n, Math.floor(c.fin)) }))
+      .filter((c) => c.fin > c.inicio)
+      .sort((a, b) => a.inicio - b.inicio);
+    // Fusión defensiva en cliente también (el backend ya fusiona; el coste
+    // es nulo y la vista queda correcta ante cualquier deriva futura).
+    const fundidas: { inicio: number; fin: number }[] = [];
+    for (const c of limpias) {
+      const ultima = fundidas[fundidas.length - 1];
+      if (ultima && c.inicio <= ultima.fin) ultima.fin = Math.max(ultima.fin, c.fin);
+      else fundidas.push({ ...c });
+    }
+    return fundidas;
+  }, [fragmento, coincidencias]);
+
+  if (validas.length === 0) return <>{fragmento}</>;
+
+  const partes: React.ReactNode[] = [];
+  let cursor = 0;
+  validas.forEach((c, i) => {
+    if (c.inicio > cursor) partes.push(fragmento.slice(cursor, c.inicio));
+    partes.push(
+      <mark
+        key={i}
+        className="rounded-sm bg-amber-400/15 px-0.5 font-medium text-amber-200"
+      >
+        {fragmento.slice(c.inicio, c.fin)}
+      </mark>,
+    );
+    cursor = c.fin;
+  });
+  if (cursor < fragmento.length) partes.push(fragmento.slice(cursor));
+  return <>{partes}</>;
+}
+
 function PanelBusqueda() {
   const [consulta, setConsulta] = useState("");
   const buscando = usarConsola((s) => s.buscandoMemoria);
@@ -117,7 +168,7 @@ function PanelBusqueda() {
                       </span>
                     </div>
                     <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-zinc-400">
-                      {r.fragmento}
+                      <FragmentoConRealce fragmento={r.fragmento} coincidencias={r.coincidencias} />
                     </p>
                   </motion.div>
                 ))

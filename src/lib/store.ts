@@ -167,6 +167,11 @@ export interface ResultadoBusqueda {
   tipo: string;
   titulo: string;
   fragmento: string;
+  // Posiciones del realce sobre `fragmento` ([inicio, fin), sin solapes),
+  // calculadas en el backend con la MISMA tolerancia a tildes que el índice
+  // (contrato z2 ronda 8). Vacía u omitida = el fragmento no contiene el
+  // término: la vista no inventa realces.
+  coincidencias?: { inicio: number; fin: number }[];
   puntuacion: number;
   fase: string;
   creado_en: string;
