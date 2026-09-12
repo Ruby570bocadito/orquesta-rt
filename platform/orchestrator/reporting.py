@@ -113,8 +113,11 @@ def construir_informe(engagement_id: str, memoria: MemoriaCaso,
         sev = _TITULO_SEVERIDAD.get(h.get("severidad", "informativa"), "—")
         lineas.append(f"### 3.{i} [{sev}] {h.get('titulo', 'sin título')}")
         lineas.append("")
-        if h.get("tecnica"):
-            lineas.append(f"**MITRE ATT&CK:** `{h['tecnica']}`  ")
+        # z3 (auditoría): la clave del dict es `tecnica_mitre` (columna real de
+        # la BD). Con `tecnica` el mapeo MITRE nunca llegaba al informe markdown
+        # (el HTML sí lo incluía): informe y HTML deben decir lo mismo.
+        if h.get("tecnica_mitre"):
+            lineas.append(f"**MITRE ATT&CK:** `{h['tecnica_mitre']}`  ")
         if h.get("activo"):
             lineas.append(f"**Activo:** {h['activo']}  ")
         lineas.append("")
