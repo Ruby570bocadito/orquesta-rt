@@ -710,3 +710,23 @@ Stage Summary:
 - La inyección indirecta LLM01 queda defendida en AMBOS canales: entrada (spotlighting v25) y salida estructurada (procedencia del bloque + contrato de canales v26). El eco verbatim del dato —el escenario realista— ya no puede aportar sugerencias aunque el modelo desobedezca la regla 8.
 - El operador ve y gobierna SU sesión desde la consola: estado vivo frente al middleware de revocación y "cerrar en todos los dispositivos" con un clic, auditado y sin tocar la credencial.
 - Siguiente (propuestas en docs/agentes/z1/sesion-03): bucle CTEM↔purple↔Sigma (ronda propia), aviso de caducidad próxima en la higiene, transparencia del escudo en la respuesta del copiloto, ingestión Neo4j con el operador.
+
+---
+Task ID: 28 (Z2-ronda-3)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 3 de pulimiento — las 4 propuestas investigadas en la Ronda 2 (cabecera de intento en webhooks, métrica de fuerza bruta en salud, barra de ruido honesta, documentación de endurecimiento) + reorganización de la bitácora de z2 en docs/agentes/z2/ (mismo patrón que z1).
+
+Work Log:
+- Sync con main (v26 de z1: copiloto e higiene de cuenta) y línea base verificada: 423 passed / 8 skipped.
+- W1 (webhook.py): cabecera X-Orquesta-Intento: 1|2 en cada intento — la entrega (X-Orquesta-Entrega) es igual en original y reintento, así que el receptor no podía distinguirlos (idempotencia/SIEM). Documentada en el contrato del módulo.
+- S1 (api.py): _LimitadorTasa registra los bloqueos 429 (deque con poda a 24 h y tope duro MAX_BLOQUEOS=10_000: peticiones denegadas tampoco crecen memoria sin límite). Nueva metrica() expuesta SOLO en el detalle AUTENTICADO de /api/salud (componentes.limitador_auth): el payload anónimo no revela que hay ataque. Métrica operacional: NO afecta a ok_total (bloqueos en masa = limitador funcionando).
+- J1 (panel.tsx): barra de ruido re-escalada al corte duro (100 % = techo × 5) con marca vertical del nivel pactado (al 20 % de la escala); el color mantiene la semántica relativa al pactado. La geometría ahora no miente: antes la barra "llena" ocultaba que el boundary aún permite 4× más ruido.
+- D1 (deploy/README.md, append puro — fichero compartido): sección "Variables de endurecimiento y superficies admin": *_TLS_VERIFICAR (contrato exacto y receta de CA corporativo), veto SSRF de webhooks en 4 capas + escape WEBHOOK_PERMITIR_METADATOS + canal heredado + X-Orquesta-Intento, SSO (SSO_VINCULAR_POR_NOMBRE, pre-aprobación de privilegiadas, endpoint admin), y la métrica de fuerza bruta.
+- TESTS (+10, test_v27_z2.py): intento 1/2 con misma entrega; 5xx → secuencia 1→2; registro y poda 24 h de bloqueos; tope duro del registro; aislamiento por clave; salud anónima sin métrica vs autenticada con ella; fuerza bruta real (4 logins, límite 3 → 429 y aparece en métrica; otra IP conserva presupuesto); bloqueos no degradan el healthcheck.
+- DOCS: creada docs/agentes/z2/ (como z1/): README.md (ficha, principios, índice), sesion-01-rondas-1-2.md (git mv de z2.md íntegro + cabecera de contexto) y sesion-02-ronda-3.md (esta ronda); z2.md queda como punta de rastro que redirige (sin romper enlaces de otros agentes).
+
+Stage Summary:
+- 433 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
+- Contratos nuevos: X-Orquesta-Intento en cada intento de webhook; componentes.limitador_auth {bloqueos_24h, claves_activas} en /api/salud autenticada; barra de ruido a escala del corte duro con marca del pactado.
+- Bitácora de z2 reorganizada en docs/agentes/z2/ (README + sesión por ronda); z2.md = punta de rastro.
+- Siguiente ronda propuesta (sesion-02-ronda-3.md): export Prometheus (/api/metricas, exige contadores acumulados), entregas del canal heredado en la consola, insignia "techo superado" en la cola de aprobaciones, test de contract de cabeceras webhook, SQLCipher (deferido a ventanilla de despliegue).

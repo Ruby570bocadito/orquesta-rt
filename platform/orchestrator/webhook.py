@@ -5,15 +5,21 @@ tabla `webhooks`): cada receptor se suscribe a los eventos que le interesen
 y el orquestador le entrega un POST HTTP real firmado, con registro de
 entregas y un reintento ante fallo transitorio:
 
-    X-Orquesta-Firma:  sha256=<HMAC-SHA256(cuerpo, secreto_del_receptor)>
-    X-Orquesta-Evento: hallazgo.registrado | ...
+    X-Orquesta-Firma:   sha256=<HMAC-SHA256(cuerpo, secreto_del_receptor)>
+    X-Orquesta-Evento:  hallazgo.registrado | ...
     X-Orquesta-Entrega: id único de entrega (cabecera de idempotencia)
+    X-Orquesta-Intento: 1 | 2 — nº de intento dentro de la entrega (z2, ronda 3)
     X-Orquesta-Id:      engagement al que pertenece el evento
 
 Prácticas del sector (Stripe/GitHub/Svix): firma HMAC-SHA256 sobre el
 cuerpo crudo, cabecera de tipo de evento, identificador de entrega y
 registro de resultados. El reintento es UNO (t+2 s) solo ante 5xx o error
 de red: un webhook operacional avisa, no bloquea nunca al orquestador.
+
+z2 (ronda 3): cada intento lleva `X-Orquesta-Intento: 1|2`. El identificador
+de entrega es igual en ambos intentos (mismo evento lógico) — el receptor
+con idempotencia por `X-Orquesta-Entrega` no distingue original de reintento
+sin esta cabecera (p. ej. para no duplicar alertas en su SIEM).
 
 Eventos emitidos por los flujos REALES del orquestador:
     hallazgo.registrado     el agente registró un hallazgo (fases.py)
@@ -373,6 +379,11 @@ def _entregar(webhook_id: str, url: str, secreto: str, evento: str,
             "X-Orquesta-Firma": firmar(cuerpo, secreto) if secreto else "",
             "X-Orquesta-Evento": evento,
             "X-Orquesta-Entrega": entrega,
+            # z2 (ronda 3): nº de intento dentro de la MISMA entrega — la
+            # entrega (uuid) es idéntica en el reintento; sin esta cabecera el
+            # receptor no puede distinguir un reintento de un envío original
+            # y su idempotencia (o su SIEM) puede duplicar la alerta.
+            "X-Orquesta-Intento": str(intento),
             "X-Orquesta-Id": engagement_id,
         }
         cabeceras = {k: v for k, v in cabeceras.items() if v}

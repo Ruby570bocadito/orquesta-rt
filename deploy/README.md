@@ -73,3 +73,68 @@ print(manifiesto)
 EOF
 kubectl -n orquesta-rt cp deploy/orquestador:/datos/respaldo.zip ./respaldo.zip
 ```
+
+## Variables de endurecimiento y superficies admin (z2, ronda 3)
+
+Variables documentadas aquí porque cambian la postura de seguridad del
+despliegue: el valor por defecto es el SEGURO; el valor relajado existe para
+laboratorio, migraciones o IdPs particulares, nunca como configuración de
+producción por defecto.
+
+### TLS saliente con credenciales (`*_TLS_VERIFICAR`)
+
+Las integraciones que envían credenciales por TLS verifican el certificado
+por defecto (`verify=True`):
+
+| Variable | Afecta a | Por defecto |
+|----------|----------|-------------|
+| `MSF_TLS_VERIFICAR` | Metasploit RPC (login+token) | verificación ON |
+| `BLOODHOUND_TLS_VERIFICAR` | BloodHound CE (API con JWT) | verificación ON |
+| `MYTHIC_TLS_VERIFICAR` | Mythic (GraphQL con token) | verificación ON |
+
+`*_TLS_VERIFICAR=0` desactiva la verificación (certificados autofirmados de
+lab). NO vale `=false` ni `=no`: el contrato es "cualquier cosa distinta de
+`0` verifica". En producción, si el CA corporativo no está en el almacén del
+contenedor, añádelo a la imagen (no desactives la verificación).
+
+### Webhooks: SSRF y canal heredado
+
+- **Veto de metadatos de nube**: los receptores no pueden apuntar a
+  link-local/IMDS (169.254.169.254, `fd00:ec2::254`, Alibaba 100.100.100.200,
+  Oracle 192.0.0.192, nombres `metadata.*`), ni por nombre, ni por IP en
+  forma alternativa, ni por DNS resuelto — verificado en el ALTA y de nuevo
+  en cada DESPACHO (anti-rebinding). Redirecciones 3xx NO se siguen
+  (`follow_redirects=False`, práctica GitHub/Stripe): da de alta la URL final.
+  Escape documentado para casos excepcionales:
+  `WEBHOOK_PERMITIR_METADATOS=1` (no debería existir un receptor allí).
+- **Canal heredado** `WEBHOOK_URL` (+ opcional `WEBHOOK_SECRETO`): recibe
+  TODOS los eventos y pasa por el MISMO veto SSRF que los receptores de BD.
+  Preferir receptores gestionados en la consola (Integraciones) sobre el
+  canal heredado: tienen rotación de secreto e historial de entregas.
+- Cada intento lleva `X-Orquesta-Intento: 1|2` (junto a `X-Orquesta-Entrega`,
+  constante en el reintento) para la idempotencia del receptor.
+
+### SSO: vinculación de cuentas
+
+El enlace silencioso por homonimia de email está DESACTIVADO por defecto
+(una cuenta SSO nueva NO se pega a una cuenta local existente sin decisión
+explícita). Capas de control:
+
+- `SSO_VINCULAR_POR_NOMBRE=1`: permite la homonimia para cuentas NO
+  privilegiadas — solo si tu IdP GARANTIZA el email verificado del dominio.
+- Cuentas privilegiadas (rol `operador` o superior): exigen SIEMPRE
+  pre-aprobación de admin (tabla `sso_vinculos_preaprobados`, caducidad de
+  30 días), esté o no el flag activo.
+- Gestión desde la API admin: `POST /api/auth/sso/vincular` (crea el vínculo
+  pre-aprobado) y `GET /api/auth/operadores` (auditoría de cuentas). Los
+  intentos de vínculo rechazados quedan en la auditoría del sistema.
+
+### Métrica de fuerza bruta en el chequeo de salud
+
+Con sesión autenticada, `/api/salud` incluye `componentes.limitador_auth`:
+`bloqueos_24h` (respuestas 429 de las últimas 24 h) y `claves_activas`
+(clientes con actividad reciente en la ventana). El payload ANÓNIMO de
+`/api/salud` no la incluye (no revela si el despliegue está bajo ataque).
+Útil para paneles de monitorización: un pico sostenido de `bloqueos_24h`
+es fuerza bruta contra el login — cruza con los logs del proxy para las IPs
+origen. Métrica operacional: NO afecta al `estado` del healthcheck.

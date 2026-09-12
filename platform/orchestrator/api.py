@@ -25,6 +25,7 @@ import os
 import re
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -164,11 +165,16 @@ class _LimitadorTasa:
     """
 
     MAX_CLAVES = 10_000
+    # z2 (ronda 3): tope duro del registro de bloqueos (visibilidad de
+    # fuerza bruta en /api/salud) — la memoria queda acotada igual que la
+    # de las claves; 10k bloqueos/24 h ya es un ataque sostenido.
+    MAX_BLOQUEOS = 10_000
 
     def __init__(self, maximo: int, ventana_s: float = 60.0):
         self.maximo = maximo
         self.ventana = ventana_s
         self._eventos: dict[str, list[float]] = {}
+        self._bloqueos: deque[float] = deque()
 
     def permitir(self, clave: str) -> tuple[bool, int]:
         ahora = time.time()
@@ -187,10 +193,28 @@ class _LimitadorTasa:
         if len(cola) >= self.maximo:
             reintentar = int(self.ventana - (ahora - cola[0])) + 1
             self._eventos[clave] = cola
+            # z2 (ronda 3): registro de bloqueos para /api/salud — visibilidad
+            # de fuerza bruta (429) sin dependencias externas. Deque con tope
+            # duro: peticiones DENEGADAS tampoco pueden crecer la memoria sin
+            # límite (el atacante no controla el diccionario de claves, pero
+            # sí genera bloqueos en masa).
+            self._bloqueos.append(ahora)
+            if len(self._bloqueos) > self.MAX_BLOQUEOS:
+                self._bloqueos.popleft()
             return False, max(1, reintentar)
         cola.append(ahora)
         self._eventos[clave] = cola
         return True, 0
+
+    def metrica(self) -> dict[str, int]:
+        """z2 (ronda 3): bloqueos (429) de las últimas 24 h + claves activas.
+        Métrica OPERACIONAL, no de salud: bloqueos en masa significa que el
+        limitador está FUNCIONANDO (defensa activa contra fuerza bruta)."""
+        ahora = time.time()
+        while self._bloqueos and ahora - self._bloqueos[0] >= 86_400:
+            self._bloqueos.popleft()
+        return {"bloqueos_24h": len(self._bloqueos),
+                "claves_activas": len(self._eventos)}
 
 
 _limitador_auth = _LimitadorTasa(maximo=10, ventana_s=60.0)
@@ -492,6 +516,11 @@ def salud(request: Request) -> dict[str, Any]:
             "ok": Path(str(auth.RUTA_DB)).exists(),
         },
         "router_ia": RouterModelos().estado_backends(),
+        # z2 (ronda 3): visibilidad de fuerza bruta sin dependencias. Solo en
+        # el detalle AUTENTICADO (el payload anónimo no revela actividad de
+        # ataque: z3 — el mínimo para monitorización). Métrica operacional:
+        # no afecta a ok_total (bloqueos en masa = limitador funcionando).
+        "limitador_auth": _limitador_auth.metrica(),
     }
     ok_total = all(c.get("ok", True) for k, c in componentes.items()
                    if k in ("memoria_casos", "operadores", "api"))

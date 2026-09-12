@@ -273,16 +273,24 @@ export function VistaPanel() {
                     {ruidoAcumulado}/{roe.techo_ruido}{ruidoAcumulado > roe.techo_ruido ? " · techo superado" : ""}
                   </span>
                 </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                <div className="relative h-1.5 overflow-hidden rounded-full bg-zinc-800">
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${Math.min(100, (ruidoAcumulado / roe.techo_ruido) * 100)}%` }}
+                    animate={{ width: `${Math.min(100, (ruidoAcumulado / (roe.techo_ruido * 5)) * 100)}%` }}
                     transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
                     className={cn("h-full rounded-full", barraRuido((ruidoAcumulado / roe.techo_ruido) * 100))}
                   />
+                  {/* Z2-ronda-3: geometría honesta — la barra escala al CORTE
+                      DURO (techo × 5, guardrails._MARGEN_TECHO_RUIDO) y la marca
+                      vertical señala el nivel pactado (techo / (techo·5) = 20%). */}
+                  <span
+                    aria-hidden
+                    className="absolute top-0 h-full w-0.5 bg-zinc-400/80"
+                    style={{ left: `${100 / 5}%` }}
+                  />
                 </div>
                 <p className="mt-1.5 font-mono text-[10px] text-zinc-600">
-                  suma del ruido estimado de cada acción que firmaste
+                  suma del ruido estimado de cada acción que firmaste · barra a escala del corte duro, marca = techo pactado
                 </p>
                 {/* Z2-ronda-2: el boundary corta DURO en techo × 5 (margen x5
                     documentado en guardrails._MARGEN_TECHO_RUIDO). El operador
