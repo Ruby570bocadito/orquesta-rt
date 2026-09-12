@@ -765,3 +765,24 @@ Stage Summary:
 - 440 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
 - El despliegue con WEBHOOK_URL ya muestra su canal y sus entregas en la consola; las decisiones de la cola de aprobaciones llevan el contexto de ruido del ROE real.
 - Siguiente ronda propuesta (sesion-03): export Prometheus (contrato público: confirmación del operador), purga de entregas por receptor, etiqueta de ctem.corrida, pings de prueba distinguibles en el historial, SQLCipher (deferido).
+
+---
+Task ID: 30
+Agent: z1 (agente colaborador, bitácora en docs/agentes/z1/)
+Task: Ronda v27 — cierre del bucle CTEM↔purple↔Sigma (propuesta abierta desde la sesión 02), transparencia del escudo LLM01 en la respuesta del copiloto y aviso de caducidad próxima en la higiene de cuenta. Todos los commits en main, push continuo por etapas.
+
+Work Log:
+- AUDITORÍA DE PARTIDA: sincronizado con origin (main @ 8be7405, v26). Re-evaluadas las 4 propuestas de mi sesión 03 contra el código real: el bucle CTEM↔Sigma es ejecutable sin operador (las tres piezas existen: corridas VECTR, esqueletos Sigma anti-invención, validador estructural; faltaba el CRUCE), higiene y transparencia siguen abiertas y son mías; Neo4j real sigue requiriendo al operador. Durante la sesión entraron la ronda 4 de z2 y la sesión 4 de z3 (F25-F30): rebase limpio sin conflictos, mis commits quedan sobre ellos.
+- BUCLE CTEM↔PURPLE↔SIGMA (ctem.py): cobertura_sigma_caso() cruza lo GENERADO (reglas_sigma_caso, anti-invención) × lo VERIFICADO (validar_lote: solo reglas que pasan cuentan como cobertura) × lo DOCUMENTADO (deteccion VECTR: detectado/prevenido → tecnicas_cubiertas, no_detectado → puntos_ciegos primera clase). instantanea() lo incluye; _delta_sigma() anota transiciones (coverage gain), regresiones (paso a punto ciego) y nuevas_reglas con flag comparable honesto — sin base (corrida pre-v27 o primera) NO se fabrican transiciones (disciplina v23). Import tardío de purpleteam/sigma_valid para evitar el ciclo con memory.
+- TRANSPARENCIA DEL ESCUDO (copiloto.py): _elegir_bloque_sano devuelve (bloque, nº ecos descartados); _partir_estructura publica escudo.ecos_descartados; construir_contexto expone escudo_marcas; consultar() compone escudo {marcas_entrada, ecos_descartados} SIEMPRE presente (aunque sea {0,0}): la transparencia es por defecto. El contador para en el primer bloque sano (declara lo descartado ANTES del ganador; deliberado y documentado).
+- CONSOLA: cadenas.tsx — insignias del bucle en el último delta ("bucle Sigma: T… detectada(s) con regla válida" esmeralda / "puntos ciegos nuevos: T…" rojo / "+N regla(s) Sigma validada(s)" teal, solo con base comparable) y "Sigma N/M válidas · K cubierta(s)" en cada fila de corrida; copiloto.tsx — nota ámbar de trabajo del escudo por respuesta; higiene.tsx — insignia "caduca pronto" (< 30 min, sesión válida) + sugerencia de renovar; tipos.ts (CoberturaSigma, DeltaCoberturaSigma, escudo) y store.ts (MensajeCopiloto.escudo) retrocompatibles.
+- TESTS (test_v27.py, 15): bucle — instantánea cruza reglas válidas, sin fuente no inventa, VECTR entra al cruce, regla inválida NO es cobertura (lote manipulado), transición E2E (corrida base → marcar detectado → delta), regresión a punto ciego, sin base no fabrica, primera corrida declara reglas sin fingir, validador sin pySigma obligatorio; escudo — eco descartado declarado, solo-eco → vacías + 1, sana → 0, marcas de entrada hostil/benigno, E2E de consultar() punta a punta, caso limpio {0,0}.
+- VALIDACIÓN: suite completa 475 passed / 8 skipped / 10 failed — los 10 idénticos al baseline del entorno (yara/ldap3, documentado desde v24): cero regresiones. tsc 0; eslint 0 en ficheros tocados.
+- DOCUMENTACIÓN: README (roadmap v27, la propuesta del bucle sale de "Siguiente"), docs/agentes/z1/sesion-04-v27-bucle-ctem-sigma-transparencia.md, índice z1 actualizado y este registro.
+- PUBLICACIÓN: 4 commits en main con push por etapas (backend 1d8428d tras rebase, consola 4600eb5, tests 053e93a, docs este).
+
+Stage Summary:
+- El modo continuo ahora cierra el ciclo ofensa→defensa→detección-as-code: cada corrida sabe qué técnicas detectadas tienen regla Sigma VÁLIDA detrás, y el delta declara la transición (coverage gain) y la regresión a punto ciego sin fabricar nada sin base comparable.
+- El escudo LLM01 es transparente por defecto: el operador ve qué filtró cada respuesta (marcas de entrada + ecos de salida) y las sugerencias declaran su procedencia sana.
+- La higiene de cuenta avisa ANTES de que el JWT muera a mitad de engagement.
+- Siguiente (propuestas en docs/agentes/z1/sesion-04): sección de cobertura en el informe continuo, KPI de puntos ciegos en el Panel, señal agregada de contenido hostil recurrente en el copiloto, ingestión Neo4j con el operador.

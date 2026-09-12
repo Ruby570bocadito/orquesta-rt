@@ -248,7 +248,12 @@ informe en español ✔ · SSO + multi-tenant + despliegue Docker/K8s ✔.
 Siguiente:
 
 - **Ingestión del dominio real del operador** al motor Neo4j de rutas (Azure/híbrido incluido).
-- **Cierre del bucle purple**: delta CTEM refleje cambios de detección al desplegar reglas Sigma validadas.
+
+Completado en v27:
+
+- **Cierre del bucle CTEM↔purple↔Sigma**: cada corrida continua cruza lo que la plataforma genera (esqueletos Sigma del caso, política anti-invención), lo que verifica (solo reglas que pasan la validación estructural cuentan como cobertura) y lo que el equipo azul documentó (detección VECTR del hallazgo). El delta entre corridas anota la transición — técnica detectada con regla válida (coverage gain) — y también la regresión a punto ciego; sin base comparable no se fabrican transiciones. Insignias del bucle en la vista Continuidad y resumen "Sigma N/M válidas" por corrida.
+- **Transparencia del escudo LLM01 en el copiloto**: cada respuesta declara lo que el escudo hizo en ambos canales — patrones marcados como dato en la ENTRADA (v25) y bloques eco descartados en la SALIDA (v26). El operador ve una nota ámbar junto al análisis; el filtrado deja de ser un silencio indistinguible de "no pasó nada".
+- **Aviso de caducidad próxima en la higiene de cuenta**: con menos de 30 min de vida del JWT el panel muestra insignia ámbar "caduca pronto" y sugiere renovar el acceso antes de perder el hilo a mitad de engagement.
 
 Completado en v26:
 
