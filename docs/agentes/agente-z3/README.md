@@ -14,6 +14,7 @@
 > | 3 | 2026-09-12 | [`sesion-3-v24-tercera-ronda.md`](sesion-3-v24-tercera-ronda.md) | Código v24 (MISP lab + Sigma), módulos de razonamiento/CTEM, rutas no-engagement, informe markdown, endurecimiento de puertos Docker |
 > | 4 | 2026-09-12 | [`sesion-4-mcp-superficie-y-endurecimiento.md`](sesion-4-mcp-superficie-y-endurecimiento.md) | Servidores MCP (SSRF osint, saneado LLM01, TLS fail-open, paquete inarrancable), superficie OpenAPI + path-traversal del proxy, revisión de núcleo/infra restante |
 > | 5 | 2026-09-12 | [`sesion-5-analitica-tenant-y-higiene-repo.md`](sesion-5-analitica-tenant-y-higiene-repo.md) | api.py completo (middleware/RBAC/admin/SSO/SSE), analítica cross-tenant (F31), material sensible en git: usuarios.db con secreto JWT (F32), cabeceras SMTP (F33), revisión de rutas.py/ldap/sso/copiloto/infra |
+> | 6 | 2026-09-12 | [`sesion-6-arsenal-ad-nombres-indefinidos.md`](sesion-6-arsenal-ad-nombres-indefinidos.md) | Módulos nunca auditados (arsenal AD, ctem, purpleteam, integraciones C2, consola Next.js) con análisis estático pyflakes: asrep() con NameError en su caso de uso (F34), dcsync() con `username` inexistente (F35), compactación de fases muerta por `import json` ausente (F36) + guarda sistémica anti-nombres-indefinidos |
 
 ## Metodología
 
@@ -78,3 +79,6 @@
 | F31 | MEDIO | 5 | Remediado (aislamiento tenant en analítica ATT&CK JSON+CSV) |
 | F32 | ALTO | 5 | Remediado (usuarios.db y casos/*.db fuera del índice de git; pendiente purga de historial) |
 | F33 | BAJO | 5 | Remediado (validación de destinatarios/asunto en envío SMTP) |
+| F34 | ALTO | 6 | Remediado (asrep(): línea muerta con `_enctype_table` inexistente eliminada — NameError/500 con cuentas roastables) |
+| F35 | MEDIO | 6 | Remediado (dcsync(): `username` → `usuario` — la herramienta nunca funcionó) |
+| F36 | BAJO | 6 | Remediado (graph.py: `import json` — compactación de fases ejecutable de nuevo; antes se tragaba en silencio) |

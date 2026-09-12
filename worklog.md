@@ -879,7 +879,6 @@ Stage Summary:
 - CI quedará en verde tras el push (la causa era solo mcp 2.x); órdenes de dirección emitidas para z2 (checklist de instalación limpia + badge post-push en cada ronda) y z1 (mantener roadmap).
 - Siguiente sesión de dirección propuesta: verificación post-push (badge, ramas, clone-limpio) y cierre formal de F32.
 
-
 ---
 Task ID: 35 (Z-DIRECTOR-sesion-02)
 Agent: z-director (dirección y revisión del conjunto orquesta-rt)
@@ -897,3 +896,21 @@ Stage Summary:
 - F32 CERRADO en GitHub: el historial público ya no contiene las BDs ni el secreto, y la CI valida desde instalación limpia en cada push (badge verde).
 - Única parte viva del hallazgo: rotación de secreto_jwt y contraseña admin en despliegues derivados (z3, esta semana) y re-clon de los entornos de agentes antes de su próximo push.
 - Pendiente del operador: revocar el token cedido; opcional GitHub Support para vistas cacheadas de commits antiguos.
+
+Task ID: 35 (z3-sesión-6)
+Agent: z3 (auditoría de seguridad)
+Task: Sesión 6 de auditoría — módulos del backend nunca auditados a fondo (arsenal AD, ctem, purpleteam, sigma_valid, integraciones C2/Neo4j/NVD/LDAP, lab, consola Next.js) con análisis estático pyflakes como técnica nueva; remediación de defectos de ligado de nombres con tests de regresión y guarda sistémica.
+
+Work Log:
+- Base: main f0967c7 (ronda 5 de z2 integrada). Lectura profunda de guardrails.py (boundary completo), ad.py, persistencia.py, navigator.py, ctem.py, purpleteam.py, sigma_valid.py, respaldo.py, sidecar.py, evasion.py, graph.py, agents/fases.py, cli/demo_seed/state, integraciones metasploit/sliver/mythic/bloodhound/nvd/rutas/ldap/misp y servidor MISP lab; consola: proxy /api/orchestrator/*, puente IA, instrumentation.ts, store.ts.
+- Barrido pyflakes sobre todo el Python de la plataforma destapa 3 nombres cargados que nadie definió ni importó (invisibles para py_compile y para los tests que no pisan el camino con datos reales).
+- F34 (ALTO funcional, ad.py:188): `etipo_clave = _enctype_table[23]` — símbolo que el módulo jamás importa, fuera de todo try: asrep() muere con NameError → 500 en /arsenal/ad justo cuando el directorio declara cuentas sin preauth (su caso de uso). Asignación muerta eliminada (el etype se lee de la AS_REP).
+- F35 (MEDIO funcional, ad.py:278): dcsync() llamaba a SMBTransport con `username` (la variable es `usuario`): NameError tras el login SMB, enmascarado por el except genérico como "fallo contra el DC real" — dcsync NUNCA funcionó. Identificador corregido.
+- F36 (BAJO, graph.py): json.dumps al cerrar cada fase sin importar json; el NameError caía en el try/except de la compactación y se tragaba en silencio — router.compactar jamás se ejecutó (economía del token cap. 3.2 muerta en silencio). import json añadido.
+- Tests: platform/tests/test_z3_sesion6.py (5 tests: asrep dinámico con impacket/pyasn1 simulados en sys.modules, camino sin cuentas, AST de dcsync sin `username`, json expuesto, guarda pyflakes sistémica con importorskip). Validación anti-falso-positivo: stash de los fixes → los 4 esperados fallan; pop → 5/5 en verde. Detectada y corregida una versión vacua de la guarda durante su construcción (check() vs checkPath()).
+- Suite completa: 10 failed (mismos preexistentes yara desde la sesión 5) / 506 passed / 8 skipped — cero regresiones (506 = 491 base s5 + 5 z3-s6 + 10 z2-r5).
+- DOCS: docs/agentes/agente-z3/sesion-6-arsenal-ad-nombres-indefinidos.md + README índice y tabla F1-F36 actualizados; este registro. Nada de otros agentes tocado.
+
+Stage Summary:
+- Total acumulado z3 → 36 fixes en 6 sesiones. El arsenal AD vuelve a estar operativo (asrep/dcsync), la compactación de fases es real y la clase de defecto "nombre indefinido" está protegida por test en toda la plataforma.
+- Pendiente de equipo (sin cambios): purga de historial git + rotación del secreto JWT de usuarios.db (F32); rotación del PAT de push.

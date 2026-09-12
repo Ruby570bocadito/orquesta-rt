@@ -185,7 +185,14 @@ def asrep(host: str, roe: Any = None) -> dict[str, Any]:
     kdc = cfg["kdc"]
     hashes: list[dict[str, Any]] = []
     errores: list[str] = []
-    etipo_clave = _enctype_table[23]
+    # z3 (auditoría F34): aquí había `etipo_clave = _enctype_table[23]` — un
+    # resto de una versión anterior que referenciaba un símbolo que este
+    # módulo JAMÁS importa (impacket.krb5.crypto._enctype_table). NameError
+    # garantizado justo cuando el directorio SÍ declara cuentas sin preauth:
+    # la herramienta moría sin llegar a pedir un solo AS-REP (500 vía
+    # /arsenal/ad, la línea estaba fuera de todo try). La asignación era
+    # además muerta: el etype se lee de la propia AS_REP más abajo y la
+    # lista solicitada ya está en cuerpo["etype"]. Se elimina.
     for nombre in cuentas[:100]:
         try:
             cliente = Principal(nombre, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
@@ -274,8 +281,15 @@ def dcsync(host: str, dn_objetivo: str = "", roe: Any = None) -> dict[str, Any]:
                 "error": f"conexión SMB al DC falló (DCSync replica vía RPC): {str(exc)[:200]}"}
     try:
         # DRSUAPI sobre la tubería SMB del DC (patrón real de replicación).
+        # z3 (auditoría F35): la llamada usaba `username`, un símbolo
+        # inexistente (la variable de este ámbito es `usuario`): NameError
+        # tras el login SMB, capturado por el except genérico como "DCSync
+        # falló contra el DC real: name 'username' is not defined". Resultado:
+        # dcsync NUNCA funcionó ni con credenciales válidas y DC alcanzable,
+        # y el operador recibía un error que apuntaba a la red en vez de al
+        # código. Se usa el identificador correcto.
         rt = transport.SMBTransport(host, 445, r"\pipe\drsuapi",
-                                    username, clave, dominio,
+                                    usuario, clave, dominio,
                                     compute_lmhash(clave), compute_nthash(clave), "")
         dce = rt.get_dce_rpc()
         dce.connect()

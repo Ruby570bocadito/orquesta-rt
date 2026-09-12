@@ -10,6 +10,12 @@ El import de langgraph es perezoso: los tests unitarios de dominio
 """
 from __future__ import annotations
 
+# z3 (auditoría F36): `json.dumps` se usa al cerrar CADA fase (compactación
+# del resumen para la economía del token, cap. 3.2) pero el módulo nunca
+# importó json. El NameError resultante caía dentro del try/except de la
+# compactación y se tragaba en silencio: `compactar` jamás llegó a ejecutarse
+# y la fase degradaba al resumen crudo sin ningún aviso en la auditoría.
+import json
 from typing import Any, Callable, Optional
 
 from .agents.fases import (
