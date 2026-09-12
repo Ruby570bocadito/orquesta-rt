@@ -326,6 +326,10 @@ export interface ReceptorWebhook {
   creado_en: string;
   actualizado_en: string;
   secreto_generado?: string;
+  // z2-ronda-6: métricas de las últimas 24 h (el receptor muerto se ve en
+  // la tarjeta sin abrir el desplegable de entregas)
+  entregas_24h?: number;
+  fallos_24h?: number;
 }
 export interface EntregaWebhook {
   webhook_id: string;
@@ -505,7 +509,7 @@ interface EstadoConsola {
   webhooks: ReceptorWebhook[] | null;
   eventosWebhook: string[];
   /** z2-ronda-4: canal heredado WEBHOOK_URL (no vive en la BD). */
-  canalHeredado: { activo: boolean; url: string } | null;
+  canalHeredado: { activo: boolean; url: string; entregas_24h?: number; fallos_24h?: number } | null;
   webhooksOcupado: boolean;
   // equipo (admin)
   operadores: OperadorCuenta[] | null;

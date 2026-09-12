@@ -47,7 +47,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -118,6 +118,14 @@ MAX_ENTREGAS = 500  # poda global del registro de entregas por despliegue
 # receptor (aplicado también al canal heredado "entorno") la ventana es
 # equitativa; la poda global se conserva como guarda del tamaño total.
 MAX_ENTREGAS_RECEPTOR = 100
+
+# z2 (ronda 6): los pings de prueba (webhook.prueba) tienen CUOTA PROPIA
+# dentro del techo por receptor: el botón Probar es manual y un operador
+# que lo martillea no debe desplazar (dentro de su techo de 100) las
+# entregas REALES del propio receptor — que son justo lo que se necesita
+# diagnosticar cuando se usa el ping. Cuota menor y separada: el historial
+# de pings útil es corto (¿responde? ¿con qué HTTP?).
+MAX_PINGS_RECEPTOR = 20
 
 
 def _ruta_db() -> Path:
@@ -424,17 +432,25 @@ def _registrar_entrega(webhook_id: str, evento: str, engagement_id: str,
                 " ok, http, error, intentos, creado_en) VALUES (?,?,?,?,?,?,?,?)",
                 (webhook_id, evento, engagement_id, 1 if ok else 0, http,
                  error, intentos, datetime.now(timezone.utc).isoformat()))
-            # Poda por RECEPTOR (z2, ronda 5): conserva las últimas
-            # MAX_ENTREGAS_RECEPTOR de ESTE receptor — un receptor parlanchín
-            # ya no desplaza el historial de los demás (la ventana de
-            # diagnóstico es equitativa). Aplica también al canal heredado
-            # ("entorno"), que no tiene fila en la tabla webhooks pero sí
-            # entregas con su id.
+            # Poda por RECEPTOR (z2, ronda 5) en dos cuotas separadas
+            # (z2, ronda 6): las entregas REALES conservan las últimas
+            # MAX_ENTREGAS_RECEPTOR y los pings de prueba la suya
+            # (MAX_PINGS_RECEPTOR) — martillear el botón Probar no desplaza
+            # el historial real del propio receptor. Aplica también al
+            # canal heredado ("entorno"), que no tiene fila en la tabla
+            # webhooks pero sí entregas con su id.
             conn.execute(
-                "DELETE FROM webhook_entregas WHERE webhook_id=? AND id NOT IN "
-                "(SELECT id FROM webhook_entregas WHERE webhook_id=? "
-                "ORDER BY id DESC LIMIT ?)",
+                "DELETE FROM webhook_entregas WHERE webhook_id=?"
+                " AND evento != 'webhook.prueba' AND id NOT IN "
+                "(SELECT id FROM webhook_entregas WHERE webhook_id=?"
+                " AND evento != 'webhook.prueba' ORDER BY id DESC LIMIT ?)",
                 (webhook_id, webhook_id, MAX_ENTREGAS_RECEPTOR))
+            conn.execute(
+                "DELETE FROM webhook_entregas WHERE webhook_id=?"
+                " AND evento = 'webhook.prueba' AND id NOT IN "
+                "(SELECT id FROM webhook_entregas WHERE webhook_id=?"
+                " AND evento = 'webhook.prueba' ORDER BY id DESC LIMIT ?)",
+                (webhook_id, webhook_id, MAX_PINGS_RECEPTOR))
             # Poda GLOBAL: guarda del tamaño total del registro (despliegue).
             conn.execute(
                 "DELETE FROM webhook_entregas WHERE id NOT IN "
@@ -499,6 +515,29 @@ def entregas_de(webhook_id: str, limite: int = 20) -> list[dict[str, Any]]:
             " creado_en FROM webhook_entregas WHERE webhook_id=?"
             " ORDER BY id DESC LIMIT ?", (webhook_id, acotado)).fetchall()
     return [dict(f) | {"ok": bool(f["ok"])} for f in filas]
+
+
+def entregas_24h_por_receptor() -> dict[str, dict[str, int]]:
+    """z2 (ronda 6): entregas y fallos de las últimas 24 h por receptor.
+
+    Fuente: `webhook_entregas` (la misma que pinta el desplegable del
+    historial). Los receptores SIN entregas en la ventana no aparecen en
+    el resultado: quien decora (api.py) pone ceros — el JSON nunca miente
+    pero tampoco inventa actividad.
+    """
+    corte = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        with _conexion() as conn:
+            filas = conn.execute(
+                "SELECT webhook_id, COUNT(*) AS total, "
+                "SUM(CASE WHEN ok=0 THEN 1 ELSE 0 END) AS fallos "
+                "FROM webhook_entregas WHERE creado_en >= ? "
+                "GROUP BY webhook_id", (corte,)).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {f["webhook_id"]: {"entregas_24h": f["total"],
+                              "fallos_24h": f["fallos"] or 0}
+            for f in filas}
 
 
 def probar_webhook(webhook_id: str) -> dict[str, Any]:

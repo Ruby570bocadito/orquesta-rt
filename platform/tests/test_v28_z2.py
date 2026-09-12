@@ -100,7 +100,12 @@ def test_canal_heredado_activo_aparece_en_la_lista(
     r = cliente_z28.get("/api/admin/webhooks", headers=cabeceras)
     assert r.status_code == 200
     canal = r.json()["canal_heredado"]
-    assert canal == {"activo": True, "url": "https://n8n.legacy/hook"}
+    assert canal["activo"] is True
+    assert canal["url"] == "https://n8n.legacy/hook"
+    # z2 (ronda 6): el canal heredado lleva también sus métricas de 24 h —
+    # sin entregas registradas la ventana cuenta CERO (no inventa actividad).
+    assert canal["entregas_24h"] == 0
+    assert canal["fallos_24h"] == 0
 
 
 def test_canal_heredado_inactivo_en_la_lista(cliente_z28, monkeypatch) -> None:

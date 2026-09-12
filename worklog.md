@@ -820,3 +820,22 @@ Stage Summary:
 - 502 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
 - La ventana de entregas webhook es equitativa entre receptores; el catálogo de eventos backend↔frontend está protegido contra deriva por contrato; los pings de prueba se distinguen a simple vista del tráfico real.
 - Siguiente ronda propuesta (sesion-04): export Prometheus (confirmación del operador, pendiente desde ronda 3), rotación de secreto de receptor con doble ventana, insignia "N fallos en 24 h" por receptor en la vista, webhook.prueba exento del techo por receptor (cuantificar antes), SQLCipher (deferido).
+
+---
+Task ID: 32 (Z2-ronda-6)
+Agent: Z2 (pulimiento de funciones y mecánicas del proyecto orquesta-rt)
+Task: Ronda 6 de pulimiento — métricas de 24 h por receptor visibles en la tarjeta, cuota propia para los pings de prueba (no desplazan entregas reales del receptor) y refresco del historial tras un ping. Rotación de secreto con doble ventana: investigada y DEFERIDA con razón técnica.
+
+Work Log:
+- Base: main f0967c7 (ronda 5 publicada tras rebase con z3 sesión 5 y z1 v27). Línea base verificada: 511 passed / 8 skipped.
+- W1 (webhook.py + api.py + store.ts + webhooks.tsx): entregas_24h / fallos_24h por receptor (y canal heredado) en GET /api/admin/webhooks — helper entregas_24h_por_receptor() con corte ISO calculado en Python; insignia roja "N fallos en 24 h" o slate "N entregas en 24 h" en la tarjeta; sin tráfico NO muestra nada (cuenta cero, no inventa actividad).
+- X1 (webhook.py): la poda por receptor se divide en dos cuotas — entregas reales conservan las últimas MAX_ENTREGAS_RECEPTOR=100 y los pings webhook.prueba la suya MAX_PINGS_RECEPTOR=20; martillear Probar ya no desplaza el historial real del propio receptor.
+- Y1 (webhooks.tsx): si el desplegable de entregas está abierto al terminar un ping, se recarga — el resultado aparece al momento.
+- DEFERIDO (sesion-05): rotación de secreto con doble ventana (dos secretos válidos simultáneos por receptor para cubrir una ventanilla de segundos en receptores internos: relación coste/beneficio desfavorable), export Prometheus (confirmación del operador, tercera ronda), SQLCipher (ventanilla de despliegue).
+- TESTS (+7, test_v30_z2.py): conteo ok/fallos 24h, la ventana ignora lo anterior a 24h, sin entregas → vacío, API decora receptores + canal heredado con ceros honestos, pings no desplazan reales (propiedad central), ambas cuotas a la vez, invariante 0 < PINGS < ENTREGAS. Contrato del canal heredado en test_v28_z2.py (ronda 4) actualizado para aceptar la extensión.
+- DOCS: docs/agentes/z2/sesion-05-ronda-6.md + índice del README de la carpeta + z2.md (punta de rastro) actualizados; este registro.
+
+Stage Summary:
+- 518 passed / 8 skipped (0 fallos), tsc 0, eslint 0.
+- El receptor muerto se ve en su tarjeta sin abrir nada; los pings de prueba tienen su propia cuota y el tráfico real conserva su ventana íntegra de 100.
+- Siguiente ronda propuesta (sesion-05): export Prometheus (decidir o retirar del roadmap), estado de salud derivado por receptor (umbrales por tipo de receptor), reenvío manual de entrega fallida (exige esquema nuevo), ETIQUETA_EVENTO compartida (YAGNI, vigilar).

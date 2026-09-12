@@ -161,6 +161,14 @@ export function SeccionWebhooks() {
           ? { ok: true, texto: `POST entregado (HTTP ${r.http})` }
           : { ok: false, texto: `sin entrega${r.http ? ` — HTTP ${r.http}` : ""}${r.error ? ` — ${r.error}` : ""}` },
       }));
+      // z2-ronda-6: si el desplegable de entregas está abierto, se refresca
+      // — el ping recién hecho aparece sin tener que plegar/desplegar.
+      if (entregasDe === id) {
+        try {
+          const lista = await cargarEntregasWebhook(id);
+          setEntregas((m) => ({ ...m, [id]: lista }));
+        } catch { /* el desplegable ya pinta su propio estado vacío */ }
+      }
     } catch (e) {
       setResultadoPrueba((m) => ({ ...m, [id]: { ok: false, texto: (e as Error).message } }));
     } finally {
@@ -277,6 +285,12 @@ export function SeccionWebhooks() {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-100" title={w.url}>{w.url}</p>
                   <Insignia tono={w.activo ? "esmeralda" : "slate"}>{w.activo ? "activo" : "pausado"}</Insignia>
+                  {/* z2-ronda-6: el receptor muerto se ve sin abrir el desplegable */}
+                  {w.fallos_24h ? (
+                    <Insignia tono="rojo">{w.fallos_24h} fallo{(w.fallos_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
+                  ) : w.entregas_24h ? (
+                    <Insignia tono="slate">{w.entregas_24h} entrega{(w.entregas_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
+                  ) : null}
                   {w.descripcion && <span className="text-[11px] text-zinc-500">{w.descripcion}</span>}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -344,6 +358,11 @@ export function SeccionWebhooks() {
                 {canalHeredado.url}
               </p>
               <Insignia tono="slate">canal heredado · WEBHOOK_URL</Insignia>
+              {canalHeredado.fallos_24h ? (
+                <Insignia tono="rojo">{canalHeredado.fallos_24h} fallo{(canalHeredado.fallos_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
+              ) : canalHeredado.entregas_24h ? (
+                <Insignia tono="slate">{canalHeredado.entregas_24h} entrega{(canalHeredado.entregas_24h ?? 0) === 1 ? "" : "s"} en 24 h</Insignia>
+              ) : null}
             </div>
             <p className="mt-1 text-[11px] text-zinc-500">
               recibe TODOS los eventos · se configura por entorno (no en la consola) ·

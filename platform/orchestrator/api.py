@@ -2902,11 +2902,22 @@ def webhooks_lista(request: Request) -> dict[str, Any]:
 
     z2 (ronda 4): incluye el estado del canal heredado WEBHOOK_URL — no
     vive en la BD y sus entregas se registran bajo el id "entorno"; sin
-    esto, un despliegue con canal heredado parecía "sin notificaciones"."""
+    esto, un despliegue con canal heredado parecía "sin notificaciones".
+    z2 (ronda 6): cada receptor (y el canal heredado) lleva entregas_24h /
+    fallos_24h — el receptor muerto se ve en la tarjeta sin abrir el
+    desplegable del historial. Sin entregas la ventana cuenta CERO: no
+    inventa actividad."""
     _admin_webhooks(request)
     wh = _modulo_webhook()
-    return {"receptores": wh.listar_webhooks(), "eventos": list(wh.EVENTOS),
-            "canal_heredado": wh.canal_heredado_estado()}
+    stats = wh.entregas_24h_por_receptor()
+    cero = {"entregas_24h": 0, "fallos_24h": 0}
+    receptores = [{**r, **stats.get(r["id"], cero)}
+                  for r in wh.listar_webhooks()]
+    canal = wh.canal_heredado_estado()
+    if canal["activo"]:
+        canal = {**canal, **stats.get("entorno", cero)}
+    return {"receptores": receptores, "eventos": list(wh.EVENTOS),
+            "canal_heredado": canal}
 
 
 @app.post("/api/admin/webhooks")
