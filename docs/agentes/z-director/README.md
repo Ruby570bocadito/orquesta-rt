@@ -19,6 +19,7 @@ esta; nunca se borra ni se edita el .md de otro agente).
 | Sesión | Fichero | Tema |
 |---|---|---|
 | 01 | [sesion-01-auditoria-directiva-y-cierre-incidentes.md](sesion-01-auditoria-directiva-y-cierre-incidentes.md) | Auditoría directiva del conjunto (veredicto: dirección correcta, modelo de 3 agentes funcionando). Cierre del F32: purga del secreto JWT y las 10 BDs de caso de TODO el historial con `git filter-repo` (pendiente: force-push del operador + rotación del secreto en despliegues derivados). Cierre de la CI roja: tope `mcp>=1.1.2,<2` (el SDK 2.x rompía 11 tests en instalaciones limpias). Corrección documentada de un falso positivo propio (trigger del workflow, que estaba correcto). |
+| 02 | [sesion-02-publicacion-y-verificacion-remota.md](sesion-02-publicacion-y-verificacion-remota.md) | Publicación de la purga en nombre del operador (force-push de main + borrado de las dos ramas remotas pre-purga) y verificación remota con ojos de tercero: clone limpio sin BDs (0 en el historial), SHA del secreto inaccesible, 31 commits íntegros y badge de Actions en verde (CI - passing). F32 queda cerrado en GitHub; viva solo la rotación en despliegues derivados (z3). Higiene del token del operador: revocación recomendada. |
 
 ## Convenciones
 

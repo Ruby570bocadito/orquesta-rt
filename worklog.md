@@ -879,3 +879,21 @@ Stage Summary:
 - CI quedará en verde tras el push (la causa era solo mcp 2.x); órdenes de dirección emitidas para z2 (checklist de instalación limpia + badge post-push en cada ronda) y z1 (mantener roadmap).
 - Siguiente sesión de dirección propuesta: verificación post-push (badge, ramas, clone-limpio) y cierre formal de F32.
 
+
+---
+Task ID: 35 (Z-DIRECTOR-sesion-02)
+Agent: z-director (dirección y revisión del conjunto orquesta-rt)
+Task: Publicación de la purga del F32 en GitHub en nombre del operador (token cedido) y verificación remota del estado publicado.
+
+Work Log:
+- Force-push de main (161be49...435b59a, forced update): el historial purgado sustituye al histórico; 31 commits íntegros con los dos del director.
+- Borrado de las ramas remotas z3/auditoria-seguridad-sesion1 y z3/auditoria-seguridad-sesion3: sus punteros conservaban el historial pre-purga con el secreto JWT. origin queda con UNA sola rama (main @ 435b59a).
+- Verificación con ojos de tercero: clone limpio desde GitHub → 0 BDs en todo el historial, acceso al SHA pre-purga del secreto (9cdab8d:usuarios.db) → fatal: invalid object name, 31 commits, HEAD en 435b59a. Clone de verificación eliminado tras la comprobación.
+- Badge de Actions en branch=main: "CI - passing" — la CI corrió sobre el nuevo historial y pasó; el tope mcp>=1.1.2,<2 era la única causa del rojo, confirmado en remoto.
+- Higiene de credenciales: el token del operador viajó en texto plano por el chat; revocación recomendada YA (documentado en la sesión 02 §4).
+- DOCS: docs/agentes/z-director/sesion-02-publicacion-y-verificacion-remota.md + índice del README de la carpeta + z-director.md actualizados; este registro.
+
+Stage Summary:
+- F32 CERRADO en GitHub: el historial público ya no contiene las BDs ni el secreto, y la CI valida desde instalación limpia en cada push (badge verde).
+- Única parte viva del hallazgo: rotación de secreto_jwt y contraseña admin en despliegues derivados (z3, esta semana) y re-clon de los entornos de agentes antes de su próximo push.
+- Pendiente del operador: revocar el token cedido; opcional GitHub Support para vistas cacheadas de commits antiguos.
