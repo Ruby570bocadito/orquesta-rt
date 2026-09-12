@@ -11,8 +11,8 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  CircleCheck, CircleDashed, Construction, GitBranch, Loader2, Route,
-  ShieldAlert, Swords,
+  CircleCheck, CircleDashed, Construction, GitBranch, Loader2, Repeat,
+  Route, ShieldAlert, Swords, XCircle,
 } from "lucide-react";
 import { Tarjeta, Insignia, TituloSeccion } from "@/components/consola/ui";
 import { usarConsola } from "@/lib/store";
@@ -55,11 +55,22 @@ export function VistaCadenas() {
   const generarPlan = usarConsola((s) => s.generarPlanThreatled);
   const ocupado = usarConsola((s) => s.threatledOcupado);
   const casoActivo = usarConsola((s) => s.casoActivo);
+  const ctem = usarConsola((s) => s.ctem);
+  const cargarCtem = usarConsola((s) => s.cargarCtem);
+  const corridaCtem = usarConsola((s) => s.corridaCtem);
+  const programarCtem = usarConsola((s) => s.programarCtem);
+  const cancelarCtem = usarConsola((s) => s.cancelarCtem);
+  const ctemOcupado = usarConsola((s) => s.ctemOcupado);
   const [seleccionada, setSeleccionada] = useState<string | null>(null);
+  const [horas, setHoras] = useState(24);
 
   useEffect(() => {
     if (!cadenas) void cargarCadenas();
   }, [cadenas, cargarCadenas]);
+
+  useEffect(() => {
+    if (casoActivo) void cargarCtem();
+  }, [casoActivo, cargarCtem]);
 
   const contrastar = async (id: string) => {
     setSeleccionada(id);
@@ -232,6 +243,175 @@ export function VistaCadenas() {
               );
             })}
           </div>
+        </motion.section>
+      ) : null}
+
+      {/* Modo continuo CTEM (v23): la exposición se mide periódicamente */}
+      {casoActivo ? (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Repeat className="h-4 w-4 text-crimson-bright" />
+            <h3 className="text-[13px] font-semibold text-zinc-200">
+              Continuidad (CTEM)
+            </h3>
+            <Insignia tono="slate">
+              la exposición se mide cada corrida · delta contra la anterior
+            </Insignia>
+          </div>
+
+          <Tarjeta className="flex flex-col gap-3">
+            <p className="text-[12px] leading-relaxed text-zinc-400">
+              Programa una cadena como instrumento continuo: el despliegue
+              lanza una <span className="text-zinc-200">corrida</span> con el
+              intervalo elegido, toma la instantánea real del caso (hallazgos,
+              detecciones VECTR, cobertura) y calcula el delta contra la
+              corrida anterior. La corrida mide: no ejecuta técnicas.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="cadena para el modo continuo"
+                value={seleccionada ?? plan?.cadena_id ?? ""}
+                onChange={(e) => setSeleccionada(e.target.value || null)}
+                className="h-8 rounded-md border border-line bg-panel px-2 font-mono text-[11px] text-zinc-300"
+              >
+                <option value="">elige cadena…</option>
+                {(cadenas ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="intervalo de corridas"
+                value={horas}
+                onChange={(e) => setHoras(Number(e.target.value))}
+                className="h-8 rounded-md border border-line bg-panel px-2 font-mono text-[11px] text-zinc-300"
+              >
+                <option value={24}>cada 24 h</option>
+                <option value={48}>cada 48 h</option>
+                <option value={168}>cada 7 días</option>
+                <option value={720}>cada 30 días</option>
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 border-line bg-panel text-[11px] text-zinc-300 hover:bg-raised"
+                disabled={ctemOcupado || !seleccionada}
+                onClick={() => {
+                  const id = seleccionada;
+                  if (id) void corridaCtem(id).catch(() => {});
+                }}
+              >
+                {ctemOcupado ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Repeat className="h-3 w-3" />
+                )}
+                corrida ahora
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 border-line bg-panel text-[11px] text-zinc-300 hover:bg-raised"
+                disabled={ctemOcupado || !seleccionada}
+                onClick={() => {
+                  const id = seleccionada;
+                  if (id) void programarCtem(id, horas).catch(() => {});
+                }}
+              >
+                <GitBranch className="h-3 w-3" />
+                programar
+              </Button>
+            </div>
+
+            {/* Programas activos */}
+            {ctem && ctem.programas.some((p) => p.activo) ? (
+              <div className="flex flex-wrap gap-2">
+                {ctem.programas
+                  .filter((p) => p.activo)
+                  .map((p) => (
+                    <span
+                      key={p.id}
+                      className="flex items-center gap-2 rounded-md border border-line bg-ink px-2 py-1 font-mono text-[10px] text-zinc-400"
+                    >
+                      {p.cadena_id} · cada {p.intervalo_horas} h
+                      {p.proxima_corrida_en
+                        ? ` · próxima ${new Date(p.proxima_corrida_en).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}`
+                        : ""}
+                      <button
+                        aria-label="detener programa"
+                        title="detener programa"
+                        className="text-zinc-500 hover:text-red-300"
+                        onClick={() => void cancelarCtem(p.id).catch(() => {})}
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+              </div>
+            ) : null}
+
+            {/* Último delta */}
+            {ctem?.ultimo_delta ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {ctem.ultimo_delta.primera_corrida ? (
+                  <Insignia tono="teal">primera corrida · base de la serie</Insignia>
+                ) : (
+                  <>
+                    <Insignia tono="esmeralda">
+                      +{ctem.ultimo_delta.hallazgos_nuevos} hallazgos
+                    </Insignia>
+                    <Insignia tono={ctem.ultimo_delta.detecciones_nuevas ? "ambar" : "slate"}>
+                      +{ctem.ultimo_delta.detecciones_nuevas} detecciones
+                    </Insignia>
+                    {ctem.ultimo_delta.nuevas_tecnicas.length ? (
+                      <Insignia tono="ambar">
+                        nuevas técnicas: {ctem.ultimo_delta.nuevas_tecnicas.join(", ")}
+                      </Insignia>
+                    ) : (
+                      <Insignia tono="slate">sin técnicas nuevas</Insignia>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {/* Historial de corridas (últimas 5) */}
+            {ctem && ctem.corridas.length ? (
+              <div className="space-y-1">
+                {ctem.corridas.slice(0, 5).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-ink px-2 py-1.5 font-mono text-[10px] text-zinc-500"
+                  >
+                    <span className="text-zinc-400">
+                      {c.resumen?.cadena_nombre ?? c.cadena_id}
+                    </span>
+                    <span>
+                      {c.resumen?.cobertura
+                        ? `${c.resumen.cobertura.ejercitados}/${c.resumen.cobertura.total} ejercitados · `
+                        : ""}
+                      {c.resumen?.detecciones_documentadas ?? 0} detecciones
+                    </span>
+                    <span>
+                      {new Date(c.creado_en).toLocaleString("es-ES", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}{" "}
+                      · {c.disparo}
+                      {c.resumen?.evidencia_id
+                        ? ` · evidencia ${c.resumen.evidencia_id}`
+                        : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </Tarjeta>
         </motion.section>
       ) : null}
     </div>

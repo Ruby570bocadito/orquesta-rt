@@ -259,6 +259,50 @@ export interface PlanThreatled {
   evidencia_id?: string;
 }
 
+/** Modo continuo CTEM (v23): corridas y programas por cadena. */
+export interface DeltaCtem {
+  primera_corrida: boolean;
+  nuevas_tecnicas: string[];
+  hallazgos_nuevos: number;
+  detecciones_nuevas: number;
+  cobertura_ejercitados: { antes: number | null; despues: number };
+}
+
+export interface CorridaCtem {
+  id: string;
+  cadena_id: string;
+  disparo: "manual" | "programada";
+  operador: string;
+  creado_en: string;
+  resumen: {
+    cadena_nombre?: string;
+    instante?: string;
+    cobertura?: { total: number; ejercitados: number; disponibles: number; manuales: number };
+    detecciones_documentadas?: number;
+    delta?: DeltaCtem;
+    corrida_id?: string;
+    evidencia_id?: string;
+  };
+}
+
+export interface ProgramaCtem {
+  id: string;
+  cadena_id: string;
+  intervalo_horas: number;
+  activo: number;
+  creado_por: string;
+  creado_en: string;
+  ultima_corrida_en: string | null;
+  proxima_corrida_en: string | null;
+}
+
+export interface EstadoCtem {
+  programas: ProgramaCtem[];
+  corridas: CorridaCtem[];
+  ultimo_resumen: CorridaCtem["resumen"] | null;
+  ultimo_delta: DeltaCtem | null;
+}
+
 export interface Organizacion {
   id: string;
   nombre: string;

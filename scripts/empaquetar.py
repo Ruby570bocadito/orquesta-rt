@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 RAIZ = Path("/home/z/my-project")
-DESTINO = RAIZ / "download" / "orquesta-rt-plataforma-v22.zip"
+DESTINO = RAIZ / "download" / "orquesta-rt-plataforma-v23.zip"
 
 # --- Incluidos de nivel raíz -------------------------------------------------
 RAIZ_FICHEROS = [
