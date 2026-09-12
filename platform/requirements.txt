@@ -35,6 +35,12 @@ yara-python>=4.5     # motor de firmas real para verificación de evasión
 python-dotenv>=1.0
 pyyaml>=6.0
 
+# Guarda de calidad de la suite (test_z3_sesion6.py): analisis estatico que
+# impide la reincidencia de la clase F34/F35/F36 (nombres indefinidos).
+# Sin ella, la guarda SKIP y la proteccion solo corre en quien la tenga
+# instalada a mano (sesion 03 del z-director).
+pyflakes>=3
+
 # Opcional: índice vectorial local para RAG del caso (descomentar si se desea)
 # chromadb>=0.5
 

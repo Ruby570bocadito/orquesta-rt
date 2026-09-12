@@ -859,8 +859,6 @@ Stage Summary:
 - Siguiente ronda propuesta (sesion-06): reenvío manual de entregas webhook fallidas (esquema), export Prometheus (cuarta ronda deferido: decidir o retirar), salud derivada por receptor, realce del término en la vista Memoria (trivial sobre el fragmento corregido).
 
 ---
-Task ID: 34 (z3-sesión-6)
-
 Task ID: 34 (Z-DIRECTOR-sesion-01)
 Agent: z-director (dirección y revisión del conjunto orquesta-rt)
 Task: Auditoría directiva independiente del proyecto (bitácoras de z1/z2/z3 + instalación limpia + estado remoto de GitHub), cierre del F32 (secreto JWT en el historial público) y de la CI roja, con bitácora propia en docs/agentes/z-director/.
@@ -899,6 +897,7 @@ Stage Summary:
 - Única parte viva del hallazgo: rotación de secreto_jwt y contraseña admin en despliegues derivados (z3, esta semana) y re-clon de los entornos de agentes antes de su próximo push.
 - Pendiente del operador: revocar el token cedido; opcional GitHub Support para vistas cacheadas de commits antiguos.
 
+---
 Task ID: 36 (z3-sesión-6)
 Agent: z3 (auditoría de seguridad)
 Task: Sesión 6 de auditoría — módulos del backend nunca auditados a fondo (arsenal AD, ctem, purpleteam, sigma_valid, integraciones C2/Neo4j/NVD/LDAP, lab, consola Next.js) con análisis estático pyflakes como técnica nueva; remediación de defectos de ligado de nombres con tests de regresión y guarda sistémica.
@@ -916,7 +915,6 @@ Work Log:
 Stage Summary:
 - Total acumulado z3 → 36 fixes en 6 sesiones. El arsenal AD vuelve a estar operativo (asrep/dcsync), la compactación de fases es real y la clase de defecto "nombre indefinido" está protegida por test en toda la plataforma.
 - Pendiente de equipo (sin cambios): purga de historial git + rotación del secreto JWT de usuarios.db (F32); rotación del PAT de push.
-=======
 
 ---
 Task ID: 37 (Z2-ronda-8)
@@ -961,7 +959,7 @@ Stage Summary:
 - Un evento webhook perdido YA NO se pierde: el operador lo reenvía con la carga fiel y ve el resultado en el historial — la propuesta en cola desde la sesión 05 queda cerrada.
 - Siguiente ronda propuesta (sesion-08): export Prometheus (quinta ronda deferido: decisión o retirada), salud derivada por receptor, reenvío en lote (deferido sin fecha), realce en títulos (marginal).
 
-
+---
 Task ID: 39 (z3-sesión-7)
 Agent: z3 (auditoría de seguridad)
 Task: Sesión 7 de auditoría — infra de despliegue (CI, install/supervisor, compose, Caddy, proxy consola, puente IA) y re-auditoría del arsenal de persistencia con threat model del propio host; remediación del hallazgo F37 con tests de regresión E2E.
@@ -978,3 +976,21 @@ Work Log:
 Stage Summary:
 - Total acumulado z3 → 37 fixes en 7 sesiones. El arsenal de persistencia ya no puede escribir ni activarse fuera del laboratorio declarado, y el operador firma el destino real (la raíz es visible en la aprobación y en la auditoría).
 - Pendiente de equipo (sin cambios): purga de historial git + rotación del secreto JWT de usuarios.db (F32); rotación del PAT de push.
+
+---
+Task ID: 40 (Z-DIRECTOR-sesion-03)
+Agent: z-director (dirección y revisión del conjunto orquesta-rt)
+Task: Revisión directiva de las 4 rondas publicadas tras la purga (z3-s6, z2-r8, z2-r9, z3-s7): verificación técnica independiente sobre el HEAD publicado y auditoría de la coordinación multi-agente post-purga.
+
+Work Log:
+- Verificación técnica: fixes F34/F35/F36/F37 presentes y reales (F37 verificado a mano: _hogares_permitidos/_raiz_confinada con realpath en ambos lados, shlex.quote del testigo, "raiz" en los argumentos del boundary). Rondas 8/9 de z2 presentes (realce con posiciones backend, reenvío manual con negaciones honestas). Suite REAL del HEAD: 556/9/0 — ni z3-s7 (535/8 en el mensaje del ÚLTIMO commit) ni z2-r9 (548/9) reportaron el número de lo publicado (bases paralelas rancio).
+- Hallazgos de coordinación: marcador de conflicto '=======' publicado en worklog.md:919 (rebase de z2-r8); fragmento huérfano 'Task ID: 34 (z3-sesión-6)' sin cuerpo (colisión con la sesión 01 del director); F32 declarado "pendiente de decisión del equipo" en bitácoras NUEVAS de z3 publicadas tras el cierre (no leyó la bitácora del director — regla 1 de convivencia incumplida); hashes base citados inexistentes (f0967c7, 0fc4e8b, f3ef61e).
+- Guarda pyflakes SKIPeaba en CI (pyflakes ausente de requirements.txt): la protección sistémica contra la clase F34/F35/F36 solo corría en la máquina de z3. Añadida pyflakes>=3 a requirements.txt; verificada en verde (la guarda PASA, suite 557/8/0).
+- Saneado del worklog: marcador de conflicto y fragmento huérfano eliminados, separadores --- restaurados. Cero contenido de fondo de otros agentes tocado.
+- DOCS: docs/agentes/z-director/sesion-03-revision-agentes-y-saneamiento.md + índice + punta de rastro; este registro.
+
+Stage Summary:
+- Veredicto técnico de las 4 rondas: EXCELENTE (F37 = hallazgo de mayor valor del ciclo; suite real 557/8/0 con la guarda activa). Veredicto de coordinación: tocada — artefactos de rebase publicados y bitácoras rancio por no leer al director.
+- Órdenes emitidas: z3 reconoce el cierre real de F32 en su próxima sesión; z2 chequea artefactos de conflicto y reporta sobre el HEAD publicado; todos leen las bitácoras previas y numeran Task IDs desde el máximo existente; operador decide el reparto de z1 (inactivo desde v27) y revoca el PAT (petición ya doble).
+
+Addendum (Task ID 40): al publicar, z1 había pusheado v28 (dashboard: ROE vivo editable, auditoría de sistema en Equipo, reasignación cross-tenant, README con GIF) — la orden de reparto de z1 queda resuelta por los hechos. Suite re-verificada tras rebase: 557/8/0. Badge del README actualizado a 557 (z1 citaba 509 en su mensaje; el README heredaba 522 de la sesión 01).

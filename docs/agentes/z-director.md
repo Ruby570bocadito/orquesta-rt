@@ -18,6 +18,11 @@ z1, z2 y z3: una sesión por fichero, todas las sesiones juntas).
   borrado de ramas remotas pre-purga) y verificación remota: clone limpio
   sin BDs, SHA del secreto inaccesible, 31 commits, badge de CI en verde.
   F32 cerrado en GitHub; viva solo la rotación en despliegues derivados.
+- **[z-director/sesion-03-revision-agentes-y-saneamiento.md](z-director/sesion-03-revision-agentes-y-saneamiento.md)** —
+  sesión 03: revisión directiva de las rondas post-purga de z2/z3
+  (veredicto técnico excelente — F37 el hallazgo del ciclo), saneado de
+  artefactos de rebase en el worklog, guarda pyflakes activada en CI y
+  órdenes de dirección para el equipo.
 
 Este fichero se conserva como punta de rastro para cualquier enlace o
 referencia de otros agentes; el contenido vivo está en la carpeta
