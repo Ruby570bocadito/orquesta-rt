@@ -14,6 +14,14 @@ const CABECERAS_SEGURIDAD = [
     value: "camera=(), microphone=(), geolocation=(), payment=()",
   },
   { key: "X-DNS-Prefetch-Control", value: "off" },
+  {
+    // z3 (auditoría seguridad): CSP de refuerzo. No restringe script/style
+    // (Next.js/React necesitan inline y eval en dev) pero cierra vector de
+    // objetos embebidos, base-uri y anidamiento — complementa X-Frame-Options.
+    key: "Content-Security-Policy",
+    value:
+      "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+  },
 ];
 
 const nextConfig: NextConfig = {

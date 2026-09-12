@@ -277,6 +277,14 @@ def csv_cobertura(cobertura: dict[str, Any]) -> str:
     import csv
     import io
 
+    def _celda_segura(valor: Any) -> Any:
+        """z3 (auditoría seguridad): neutraliza inyección de fórmulas (el
+        nombre de campaña viene de datos de caso y acaba en una hoja de
+        cálculo al abrir el CSV). = + - @ tab/CR → texto literal."""
+        if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + valor
+        return valor
+
     nombres = {c["id"]: c["nombre"] for c in cobertura["campañas"]}
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
@@ -290,7 +298,8 @@ def csv_cobertura(cobertura: dict[str, Any]) -> str:
                 continue
             det = celda["deteccion"]
             w.writerow([
-                fila["tecnica"], cid, nombres[cid], celda["estado"],
+                _celda_segura(fila["tecnica"]), _celda_segura(cid),
+                _celda_segura(nombres[cid]), _celda_segura(celda["estado"]),
                 celda["hallazgos"], celda["severidad_max"] or "",
                 det.get("detectado", 0), det.get("no_detectado", 0),
                 det.get("prevenido", 0), det.get("pendiente", 0),

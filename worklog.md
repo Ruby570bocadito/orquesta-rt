@@ -554,3 +554,27 @@ Stage Summary:
 - La plataforma ahora compite en el eje que define el sector (CTEM/AEV): la exposición se mide continuamente con delta real entre corridas, no con informes puntuales.
 - El escaparate (README) muestra por fin lo que el proyecto ES, con el GIF y capturas reales de la demo; la CI ejecuta 303 tests en cada push.
 - Siguiente: instancia MISP de lab (docker-compose.lab.yml), ingestión del dominio real del usuario al motor Neo4j, validación Sigma en vivo.
+
+---
+Task ID: z3-sesion-1
+Agent: z3 (agente de revisión de código y seguridad)
+Task: Auditoría integral de seguridad de orquesta-rt (bug + security review), remediación profesional y documentación en docs/agentes/z3.md
+
+Work Log:
+- Revisión completa de la superficie de seguridad: auth.py, sso.py, api.py (2839 líneas), webhook.py, memory.py, transportes.py, guardrails.py, proxy Next.js, puente IA, instrumentation.ts, docker-compose, Caddyfile, .gitignore y BDs del repo. Lo sólido verificado y documentado (JWT HS256, scrypt, PKCE+RS256 del SSO, guardrails de alcance, doble verificación de scope).
+- F1 CRÍTICO: usuarios.db (secreto JWT + hash admin) y 10 BDs de casos publicadas en el repo público → .gitignore + git rm --cached; guía de rotación y purge de historial en docs/agentes/z3.md.
+- F2 ALTO: Caddyfile :81 era un proxy abierto a cualquier puerto local vía ?XTransformPort= (SSRF a vLLM/orquestador/lab) → handler eliminado.
+- F3 ALTO (BOLA): POST /api/aprobaciones/{id}/decision ignoraba el tenant → operador de una organización podía firmar aprobaciones de casos de otra. Ahora filtra por tenant (admin cross-tenant). Verificado E2E (404 cross-tenant / 200 dueño).
+- F4 ALTO: JWTs sin revocación (cuenta eliminada/degradada/restablecida seguía viva 12 h) → columna migrada invalidar_antes + auth.sesion_viva() en middleware con caché TTL 15 s; invalidación disparada por cambiar/restablecer contraseña, cambiar rol, mover tenant y baja de cuenta.
+- F5 ALTO: CLAVE_CASO hardcodeada en instrumentation.ts (falsificación de cadena de custodia) → clave aleatoria de 256 bits persistida en db/clave-caso (0600) + verificación con claves legadas (CLAVES_CASO_LEGADO) para no invalidar evidencias existentes; las nuevas siempre se firman con la clave vigente.
+- F6 MEDIO (SSRF webhook): follow_redirects=False (302 ya no salta la vetación) + vetación por IP literal (ipaddress) de metadatos AWS/GCP/Azure/Alibaba/Oracle + escape WEBHOOK_PERMITIR_METADATOS; loopback se mantiene permitido (test v16 lo exige: n8n on-prem).
+- F7 MEDIO: limitador de tasa usaba el PRIMER salto de XFF (controlado por el cliente) → último salto; compose publica 8000 solo en 127.0.0.1.
+- F8 MEDIO: inyección de fórmulas CSV en hallazgos.csv y cobertura CSV → sanitización = + - @ \t \r con apóstrofe.
+- F9/F10: CORS default * → http://localhost:3000; CSP de refuerzo (object-src/base-uri/frame-ancestors/form-action) en next.config.ts.
+- Verificación: 285 passed / 8 skipped (10 fallos preexistentes por deps opcionales ausentes, idénticos con git stash sobre el commit base); script funcional de los fixes 7/7 en verde; TS sin errores de sintaxis.
+- Documentación completa en docs/agentes/z3.md (hallazgos, evidencia, soluciones, pendientes de rotación) + recomendaciones P2 sin cambio de código (TLS verify=False configurable, vinculación SSO por nombre, JWT en localStorage, estado en memoria mono-proceso).
+
+Stage Summary:
+- 5 hallazgos críticos/altos + 5 medios remediados con backwards-compat (migraciones idempotentes, clave legada de custodia, tests existentes en verde).
+- ACCIONES PENDIENTES DEL EQUIPO: rotar secreto_jwt (publicado), tratar datos de casos publicados como brecha, y decidir purge de historial git (filter-repo + force-push).
+- Detalle completo en docs/agentes/z3.md.

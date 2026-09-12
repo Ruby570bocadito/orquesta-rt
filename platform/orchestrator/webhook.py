@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -58,8 +59,28 @@ EVENTOS: tuple[str, ...] = (
 
 # Redes de metadatos de nube vetadas como receptor (SSRF): el webhook es
 # una configuración de admin, pero el límite link-local es defense-in-depth.
-_HOSTS_VETADOS = {"metadata.google.internal"}
-_CIDRS_VETADOS = ("169.254.",)
+# z3 (auditoría seguridad): lista ampliada y por IP LITERAL (ipaddress), no
+# por prefijo de texto — "169.254." no atrapaba 0xA9.0xFE..., ni los
+# metadatos de Alibaba (100.100.100.200) u Oracle (192.0.0.192). El loopback
+# se PERMITE (receptor n8n/lab en el mismo host es uso legítimo on-prem).
+# Escape para despliegues con receptores en redes de metadatos (no debería
+# existir): WEBHOOK_PERMITIR_METADATOS=1.
+_HOSTS_VETADOS = {"metadata.google.internal", "metadata.goog"}
+_REDES_METADATOS = tuple(ipaddress.ip_network(r) for r in (
+    "169.254.0.0/16",       # link-local: AWS/GCP/Azure IMDS
+    "fd00:ec2::254/128",    # AWS IMDS IPv6
+    "100.100.100.200/32",   # Alibaba Cloud IMDS
+    "192.0.0.192/32",       # Oracle Cloud IMDS
+))
+
+
+def _es_ip_metadatos(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in red for red in _REDES_METADATOS)
+
 
 MAX_ENTREGAS = 500  # poda del registro de entregas por despliegue
 
@@ -109,9 +130,9 @@ def _conexion() -> sqlite3.Connection:
 def validar_url(url: str) -> str:
     """Valida la URL del receptor y la devuelve normalizada (str.strip).
 
-    Exige http/https y host; veta los endpoints de metadatos de nube.
-    Lanza ValueError con mensaje accionable (el endpoint lo traduce a 422).
-    """
+    Exige http/https y host; veta los endpoints de metadatos de nube
+    (por nombre e IP literal). Lanza ValueError con mensaje accionable
+    (el endpoint lo traduce a 422)."""
     limpio = (url or "").strip()
     partes = urlparse(limpio)
     if partes.scheme not in ("http", "https"):
@@ -119,8 +140,10 @@ def validar_url(url: str) -> str:
     host = partes.hostname or ""
     if not host:
         raise ValueError("la URL necesita un host (p. ej. https://n8n.interno/webhook)")
-    if host.lower() in _HOSTS_VETADOS or host.startswith(_CIDRS_VETADOS):
-        raise ValueError("receptor no permitido: endpoints de metadatos de nube vetados")
+    if os.environ.get("WEBHOOK_PERMITIR_METADATOS", "") != "1":
+        if (host.lower() in _HOSTS_VETADOS or _es_ip_metadatos(host)):
+            raise ValueError(
+                "receptor no permitido: endpoints de metadatos de nube vetados")
     return limpio
 
 
@@ -249,8 +272,17 @@ def _post(url: str, cuerpo: bytes, cabeceras_extra: dict[str, str]) -> dict[str,
         import httpx
         cabeceras = {"Content-Type": "application/json",
                      "User-Agent": "OrquestaRT-Webhook/1", **cabeceras_extra}
-        with httpx.Client(timeout=5.0, follow_redirects=True) as cliente:
+        # z3 (auditoría seguridad): follow_redirects DESACTIVADO. Con redirec-
+        # tos activos, un receptor malicioso hacía 302 hacia
+        # http://169.254.169.254/... y saltaba la vetación de validar_url
+        # (el cliente HTTP resolvía la redirección sin revalidar). Un 3xx se
+        # reporta como fallo de entrega con diagnóstico claro.
+        with httpx.Client(timeout=5.0, follow_redirects=False) as cliente:
             r = cliente.post(url, content=cuerpo, headers=cabeceras)
+        if 300 <= r.status_code < 400:
+            return {"ok": False, "http": r.status_code,
+                    "error": "el receptor redirige: los webhooks deben "
+                             "apuntar al endpoint final (sin 3xx)"}
         return {"ok": 200 <= r.status_code < 300, "http": r.status_code, "error": None}
     except Exception as exc:
         return {"ok": False, "http": None, "error": str(exc)[:200]}

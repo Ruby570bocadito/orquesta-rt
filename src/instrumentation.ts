@@ -49,6 +49,44 @@ async function asegurarTokenPuente(): Promise<string> {
   return token;
 }
 
+// z3 (auditoría seguridad): clave HMAC LEGADA del código. Solo sirve para
+// VERIFICAR evidencias antiguas firmadas con ella (cadena de custodia);
+// jamás para firmar evidencias nuevas. En memory.py se refleja como
+// CLAVES_CASO_LEGADO.
+const CLAVE_CASO_LEGADA = "clave-onprem-cambiar-en-produccion!";
+const RUTA_CLAVE_CASO = path.join(RAIZ, "db", "clave-caso");
+
+/**
+ * Clave HMAC de la cadena de custodia (db/clave-caso, 0600).
+ *
+ * z3 (auditoría seguridad): antes se usaba una clave hardcodeada
+ * ("clave-onprem-cambiar-en-produccion!") cuando CLAVE_CASO no venía del
+ * entorno — cualquiera con el repo podía FALSIFICAR evidencias de cualquier
+ * despliegue dev. Ahora: 1) respeta CLAVE_CASO del entorno; 2) si no existe,
+ * genera una clave aleatoria de 256 bits y la persiste (0600) para que la
+ * cadena de custodia sobreviva a reinicios.
+ */
+async function asegurarClaveCaso(): Promise<string> {
+  const fs = await import(/* turbopackIgnore: true */ "node:fs");
+  const { randomBytes } = await import(/* turbopackIgnore: true */ "node:crypto");
+  if (process.env.CLAVE_CASO) return process.env.CLAVE_CASO;
+  try {
+    const existente = fs.readFileSync(RUTA_CLAVE_CASO, "utf8").trim();
+    if (existente) return existente;
+  } catch {
+    /* no existe aún */
+  }
+  const clave = randomBytes(32).toString("hex");
+  fs.mkdirSync(path.join(RAIZ, "db"), { recursive: true });
+  fs.writeFileSync(RUTA_CLAVE_CASO, clave + "\n", { mode: 0o600 });
+  console.warn(
+    "[instrumentation] CLAVE_CASO no definida: generada y persistida en db/clave-caso (0600). " +
+      "Evidencias previas firmadas con la clave legada se siguen VERIFICANDO (CLAVES_CASO_LEGADO) " +
+      "pero las nuevas se firman con la clave fuerte.",
+  );
+  return clave;
+}
+
 /**
  * Intérprete Python con las dependencias de la plataforma (uvicorn+fastapi).
  *
@@ -143,6 +181,7 @@ async function _arrancarBackendInterno(): Promise<{ orquestador: boolean; lab: b
     }
     // Puente IA real: GLM vía SDK de la consola en formato OpenAI-compatible.
     const tokenPuente = await asegurarTokenPuente();
+    const claveCaso = await asegurarClaveCaso();
     const python = await resolverPython();
     const out = fs.openSync(LOG_ORQUESTADOR, "a");
     spawn(
@@ -160,7 +199,8 @@ async function _arrancarBackendInterno(): Promise<{ orquestador: boolean; lab: b
           ...process.env,
           RAIZ_CASOS: `${RAIZ_PLATAFORMA}/casos`,
           RAIZ_SKILLS: `${RAIZ_PLATAFORMA}/skills`,
-          CLAVE_CASO: process.env.CLAVE_CASO ?? "clave-onprem-cambiar-en-produccion!",
+          CLAVE_CASO: claveCaso,
+          CLAVES_CASO_LEGADO: process.env.CLAVES_CASO_LEGADO ?? CLAVE_CASO_LEGADA,
           API_FRONTERA_BASE: "http://127.0.0.1:3000/api/ia",
           API_FRONTERA_CLAVE: tokenPuente,
           MODELO_FRONTERA: process.env.MODELO_FRONTERA ?? "glm-4.6",

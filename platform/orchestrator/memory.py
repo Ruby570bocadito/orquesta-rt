@@ -217,6 +217,14 @@ class MemoriaCaso:
             # Clase de desarrollo: clave derivada de la ruta. En producción se
             # exige CLAVE_CASO y la ausencia es un fallo de arranque.
             self.clave_caso = hashlib.sha256(str(self.db_path).encode()).hexdigest().encode()[:32]
+        # z3 (auditoría seguridad): claves LEGADAS, solo para VERIFICAR
+        # evidencias existentes firmadas antes de una rotación de clave
+        # (p. ej. la clave hardcodeada histórica de los despliegues dev).
+        # JAMÁS se usan para firmar evidencias nuevas: la firma siempre sale
+        # de self.clave_caso. Configurables vía CLAVES_CASO_LEGADO (coma).
+        legadas = os.environ.get("CLAVES_CASO_LEGADO", "")
+        self.claves_legado = tuple(
+            c.strip().encode() for c in legadas.split(",") if c.strip())
         self._conn = sqlite3.connect(str(self.db_path), timeout=10)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -273,6 +281,21 @@ class MemoriaCaso:
 
     def _firma(self, hash_contenido: str) -> str:
         return hmac.new(self.clave_caso, hash_contenido.encode(), hashlib.sha256).hexdigest()
+
+    def _firma_valida(self, hash_contenido: str, firma_hmac: str) -> bool:
+        """z3 (auditoría seguridad): verificación de firma con rotación de
+        clave. Valida contra la clave VIGENTE y, si no coincide, contra las
+        claves legadas (CLAVES_CASO_LEGADO) para no invalidar la cadena de
+        custodia de evidencias firmadas antes de una rotación. La firma de
+        evidencias NUEVAS siempre usa la clave vigente."""
+        if hmac.compare_digest(self._firma(hash_contenido), firma_hmac):
+            return True
+        for clave in getattr(self, "claves_legado", ()):
+            if hmac.compare_digest(
+                    hmac.new(clave, hash_contenido.encode(),
+                             hashlib.sha256).hexdigest(), firma_hmac):
+                return True
+        return False
 
     # -- engagement ----------------------------------------------------------
 
@@ -392,7 +415,7 @@ class MemoriaCaso:
             if fila["hash_previo"] != previo:
                 return {"valida": False, "total": len(filas),
                         "primer_error": f"ruptura de encadenamiento en {fila['id']}"}
-            if not hmac.compare_digest(self._firma(fila["hash_sha256"]), fila["firma_hmac"]):
+            if not self._firma_valida(fila["hash_sha256"], fila["firma_hmac"]):
                 return {"valida": False, "total": len(filas),
                         "primer_error": f"firma inválida en {fila['id']}"}
             previo = fila["hash_sha256"]
