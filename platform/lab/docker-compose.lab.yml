@@ -28,6 +28,23 @@ services:
       - SERVIDOR_LAB=acme-demo (ficticio)
     restart: unless-stopped
 
+  # Threat intel de laboratorio: API MISP compatible (subconjunto REST real)
+  # para ejercitar el enriquecimiento threat-intel de extremo a extremo.
+  # Clave del lab: clave-lab-misp (SOLO laboratorio; cámbiala con LAB_MISP_KEY).
+  # En el backend: MISP_URL=http://lab-misp:9000  MISP_KEY=clave-lab-misp
+  lab-misp:
+    image: python:3.12-alpine
+    container_name: lab-acme-misp
+    entrypoint: >
+      python3 /servidor_misp_lab.py --host 0.0.0.0 --puerto 9000
+        --estado /estado/misp_lab.json
+    volumes:
+      - ./servidor_misp_lab.py:/servidor_misp_lab.py:ro
+      - lab_misp_estado:/estado
+    ports:
+      - "8444:9000"
+    restart: unless-stopped
+
   # Genera el certificado autofirmado del lab antes de arrancar nginx
   lab-certificado:
     image: alpine/openssl
@@ -45,3 +62,4 @@ services:
 
 volumes:
   lab_certs:
+  lab_misp_estado:
