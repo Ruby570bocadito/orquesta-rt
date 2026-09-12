@@ -234,19 +234,27 @@ def _es_eco_de_datos(bloque: str, contexto: str) -> bool:
 
 
 def _elegir_bloque_sano(candidatos: list[tuple[str, dict[str, Any]]],
-                        contexto: str = "") -> dict[str, Any] | None:
-    """Bloque de sugerencias de MAYOR procedencia.
+                        contexto: str = "") -> tuple[dict[str, Any] | None, int]:
+    """Bloque de sugerencias de MAYOR procedencia + ecos descartados.
 
     Se recorre de último a primero (la regla 5 pone el bloque del copiloto
     al final y la 5b prohíbe escribir después) descartando todo bloque que
     sea eco del canal de datos. Gana el primer candidato sano; si todos son
     eco (o no hay) devuelve None: las sugerencias quedan vacías — NUNCA se
-    fabrican ni se adoptan del dato."""
+    fabrican ni se adoptan del dato.
+
+    v27 (transparencia del escudo): el segundo elemento es el NÚMERO de
+    ecos descartados — el operador tiene derecho a saber que la respuesta
+    fue filtrada y por qué, en lugar de un silencio indistinguible de
+    «el modelo no dio bloque».
+    """
+    ecos = 0
     for bloque, datos in reversed(candidatos):
         if _es_eco_de_datos(bloque, contexto):
+            ecos += 1
             continue
-        return datos
-    return None
+        return datos, ecos
+    return None, ecos
 
 
 def _blindar_fragmento(texto: str) -> tuple[str, int]:
@@ -380,6 +388,10 @@ def construir_contexto(memoria, engagement_id: str, pregunta: str,
         "fase": fila["fase_actual"],
         "n_hallazgos": len(hallazgos),
         "n_objetivos": len(objetivos),
+        # v27: el número de marcas de la ENTRADA sale junto al resto, para
+        # que la respuesta pueda declarar el trabajo del escudo de punta a
+        # punta (entrada marcada + salida filtrada).
+        "escudo_marcas": n_marcas,
         "fuentes": [
             {"id": r["id"], "tipo": r["tipo"], "titulo": r["titulo"],
              "fragmento": r["fragmento"][:200]}
@@ -416,7 +428,7 @@ def _partir_estructura(texto: str, contexto: str = "") -> dict[str, Any]:
          (último bloque válido) para no romper ningún llamador.
     """
     sugerencias: list[dict[str, Any]] = []
-    datos = _elegir_bloque_sano(_candidatos_json(texto), contexto)
+    datos, ecos_descartados = _elegir_bloque_sano(_candidatos_json(texto), contexto)
     if isinstance(datos, dict) and isinstance(datos.get("sugerencias"), list):
         for s in datos["sugerencias"][:6]:
             if not isinstance(s, dict):
@@ -442,7 +454,8 @@ def _partir_estructura(texto: str, contexto: str = "") -> dict[str, Any]:
         if titulo and cuerpo:
             secciones[titulo] = cuerpo[:1800]
     return {"secciones": secciones, "texto": texto_limpio,
-            "sugerencias": sugerencias}
+            "sugerencias": sugerencias,
+            "escudo": {"ecos_descartados": ecos_descartados}}
 
 
 def consultar(memoria, router, engagement_id: str, pregunta: str,
@@ -468,6 +481,15 @@ def consultar(memoria, router, engagement_id: str, pregunta: str,
         "respuesta": estructura["texto"],
         "secciones": estructura["secciones"],
         "sugerencias": estructura["sugerencias"],
+        # v27 — transparencia del escudo: la respuesta declara lo que el
+        # escudo hizo en AMBOS canales. Si hubo marcas en la entrada o ecos
+        # descartados en la salida, la consola lo enseña junto al análisis:
+        # el filtrado no puede ser un silencio indistinguible de que no
+        # pasó nada.
+        "escudo": {
+            "marcas_entrada": int(datos.get("escudo_marcas", 0)),
+            "ecos_descartados": int(estructura["escudo"]["ecos_descartados"]),
+        },
         "modelo": respuesta.modelo,
         "tipo_modelo": respuesta.tipo.value,
         "tokens_entrada": respuesta.tokens_entrada,

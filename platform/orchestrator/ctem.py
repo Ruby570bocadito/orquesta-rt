@@ -87,6 +87,56 @@ def _tecnicas_ejercitadas(memoria: Any, engagement_id: str) -> set[str]:
     return threatled.tecnicas_ejercitadas_de(hallazgos, acciones)
 
 
+def cobertura_sigma_caso(memoria: Any, engagement_id: str,
+                         hallazgos: list[dict[str, Any]]) -> dict[str, Any]:
+    """Cruce REAL purple↔Sigma↔VECTR del caso (v27, cierre del bucle).
+
+    La plataforma genera esqueletos Sigma desde hallazgos reales con
+    política anti-invención (purpleteam.reglas_sigma_caso) y los valida
+    antes de entregarlos (sigma_valid). Este cruce responde la pregunta
+    que el informe purple no cierra sola: ¿qué técnicas del caso tienen
+    HOY una regla Sigma VALIDADA y qué dice el equipo azul de ellas?
+
+    - ``tecnicas_con_regla_valida``: SOLO cuentan las reglas que pasan la
+      validación estructural (una regla rota no es cobertura: es deuda).
+    - ``tecnicas_cubiertas``: técnica con regla válida Y detección
+      documentada por el operador como detectado/prevenido (VECTR).
+    - ``puntos_ciegos``: técnica con regla válida Y marcada no_detectado
+      — la regla existe pero la defensa falló: el dato más accionable.
+
+    Nada se infiere de catálogos: cada técnica de estas listas tiene un
+    hallazgo REAL detrás y una regla generada REAL en el caso.
+    """
+    from . import purpleteam  # import tardío: purpleteam importa memory
+    from . import sigma_valid  # (y ctem lo importa memory: evitar ciclo)
+    reglas, _sin_fuente = purpleteam.reglas_sigma_caso(engagement_id, memoria)
+    veredicto = sigma_valid.validar_lote(
+        {r["id"]: r["yml"] for r in reglas}) if reglas else {
+        "total": 0, "validas": 0, "invalidas": 0, "reglas": []}
+    valida_por_id = {d["nombre"]: bool(d["valida"])
+                     for d in veredicto.get("reglas", [])}
+    tecnicas_validas = {r["tecnica"] for r in reglas
+                        if valida_por_id.get(r["id"])}
+    cubiertas: set[str] = set()
+    ciegos: set[str] = set()
+    for h in hallazgos:
+        tecnica = str(h.get("tecnica_mitre") or "").strip().upper()
+        if not tecnica or tecnica not in tecnicas_validas:
+            continue
+        det = str(h.get("deteccion") or "pendiente").lower()
+        if det in {"detectado", "prevenido"}:
+            cubiertas.add(tecnica)
+        elif det == "no_detectado":
+            ciegos.add(tecnica)
+    return {
+        "reglas_total": len(reglas),
+        "reglas_validas": sum(1 for r in reglas if valida_por_id.get(r["id"])),
+        "tecnicas_con_regla_valida": sorted(tecnicas_validas),
+        "tecnicas_cubiertas": sorted(cubiertas),
+        "puntos_ciegos": sorted(ciegos),
+    }
+
+
 def instantanea(memoria: Any, engagement_id: str, cadena: threatled.Cadena) -> dict[str, Any]:
     """Estado REAL del caso en este instante, contrastado con la cadena.
 
@@ -126,8 +176,56 @@ def instantanea(memoria: Any, engagement_id: str, cadena: threatled.Cadena) -> d
         "detecciones": por_deteccion,
         "detecciones_documentadas": sum(
             v for k, v in por_deteccion.items() if k != "pendiente"),
+        # v27 — bucle CTEM↔purple↔Sigma: el cruce purple (reglas generadas
+        # del caso) × Sigma (solo válidas) × VECTR (detección documentada)
+        # viaja en CADA instantánea; el delta lo convierte en transiciones.
+        "cobertura_sigma": cobertura_sigma_caso(memoria, engagement_id,
+                                                hallazgos),
         "aprobaciones_pendientes": len(pendientes),
         "acciones_ejecutadas": acciones_ejecutadas,
+    }
+
+
+def _delta_sigma(antes: Optional[dict[str, Any]],
+                 despues: dict[str, Any]) -> dict[str, Any]:
+    """Transiciones de cobertura Sigma entre dos instantáneas (v27).
+
+    El cierre del bucle: cuando el operador marca `detectado`/`prevenido`
+    en un hallazgo cuya técnica tiene regla Sigma VALIDADA, la siguiente
+    corrida anota la TRANSICIÓN (la técnica pasa a ``tecnicas_cubiertas``)
+    y el delta la declara aquí — el dato que Picus/SCYthe llaman
+    "coverage gain" y que aquí sale solo de evidencia del caso.
+
+    Honestidad de la comparación:
+    - ``comparable`` es False si la corrida anterior es anterior a v27
+      (sin ``cobertura_sigma`` en su resumen) o es la primera: SIN base
+      no se fabrican transiciones — el estado actual ya viaja en la
+      instantánea y el informe dice la verdad.
+    - ``regresiones``: técnicas que PASARON a puntos ciegos (la defensa
+      dejó de detectar con regla vigente) — el movimiento que más urge
+      revisar y el más fácil de pasar por alto.
+    """
+    s_antes = (antes or {}).get("cobertura_sigma") or None
+    s_despues = (despues or {}).get("cobertura_sigma") or None
+    if s_despues is None:
+        return {"comparable": False, "transiciones": [], "regresiones": [],
+                "nuevas_reglas": []}
+    if s_antes is None:
+        return {"comparable": False, "transiciones": [], "regresiones": [],
+                "nuevas_reglas": sorted(
+                    s_despues.get("tecnicas_con_regla_valida") or [])}
+    regla_antes = set(s_antes.get("tecnicas_con_regla_valida") or [])
+    regla_despues = set(s_despues.get("tecnicas_con_regla_valida") or [])
+    cubiertas_antes = set(s_antes.get("tecnicas_cubiertas") or [])
+    cubiertas_despues = set(s_despues.get("tecnicas_cubiertas") or [])
+    ciegos_antes = set(s_antes.get("puntos_ciegos") or [])
+    ciegos_despues = set(s_despues.get("puntos_ciegos") or [])
+    return {
+        "comparable": True,
+        # La transición que cierra el bucle ofensa→defensa→detección-as-code.
+        "transiciones": sorted(cubiertas_despues - cubiertas_antes),
+        "regresiones": sorted(ciegos_despues - ciegos_antes),
+        "nuevas_reglas": sorted(regla_despues - regla_antes),
     }
 
 
@@ -143,6 +241,7 @@ def delta_entre(antes: Optional[dict[str, Any]], despues: dict[str, Any]) -> dic
             "detecciones_nuevas": despues["detecciones_documentadas"],
             "cobertura_ejercitados": {"antes": None,
                                       "despues": despues["cobertura"]["ejercitados"]},
+            "cobertura_sigma": _delta_sigma(antes, despues),
         }
     tec_antes = set(antes.get("tecnicas_ejercitadas") or [])
     tec_despues = set(despues.get("tecnicas_ejercitadas") or [])
@@ -160,6 +259,7 @@ def delta_entre(antes: Optional[dict[str, Any]], despues: dict[str, Any]) -> dic
             "antes": antes.get("cobertura", {}).get("ejercitados"),
             "despues": despues["cobertura"]["ejercitados"],
         },
+        "cobertura_sigma": _delta_sigma(antes, despues),
     }
 
 
