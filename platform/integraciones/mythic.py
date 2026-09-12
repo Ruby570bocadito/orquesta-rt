@@ -12,6 +12,8 @@ con httpx — sin SDK intermedio — para:
 Configuración (variables de entorno del backend):
   MYTHIC_URL      p. ej. https://mythic.server:7443
   MYTHIC_TOKEN    token del usuario API de Mythic (Mythic → Create Token)
+  MYTHIC_TLS_VERIFICAR  "1" (por defecto) verifica el certificado TLS;
+                  "0" desactiva la verificación (solo labs autofirmados)
 
 Los errores de GraphQL se devuelven en "error" tal cual llegan: si una
 versión de Mythic cambia un campo, el operador ve el mensaje real y no un
@@ -64,7 +66,10 @@ def _gql(consulta: str, variables: dict[str, Any] | None = None) -> dict[str, An
     """POST GraphQL autenticado a la API oficial de Mythic."""
     url, token = _config()
     import httpx
-    with httpx.Client(timeout=20, verify=False) as c:
+    # z3 (auditoría seguridad): el token Mythic viaja en cada petición. TLS se
+    # verifica POR DEFECTO; MYTHIC_TLS_VERIFICAR=0 lo desactiva consciente.
+    verificar = os.environ.get("MYTHIC_TLS_VERIFICAR", "1") != "0"
+    with httpx.Client(timeout=20, verify=verificar) as c:
         r = c.post(f"{url}/graphql",
                    json={"query": consulta, "variables": variables or {}},
                    headers={"MythicToken": token,

@@ -26,6 +26,18 @@ try:
 except ImportError:  # pragma: no cover
     raise SystemExit("Falta el SDK de MCP: pip install mcp")
 
+# z3 (auditoría seguridad): política TLS centralizada del recon. Sin ella,
+# cada herramienta decidiría su propio verify=False silencioso.
+# RECON_TLS_ESTRICTO=1 hace que los sondeos verifiquen el certificado.
+import sys as _sys  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+try:
+    from orchestrator.transportes import _cliente_http as _cliente_recon  # noqa: E402
+except Exception:  # pragma: no cover - despliegue solo-MCP sin orchestrator
+    def _cliente_recon(**kw):
+        return httpx.Client(verify=False, **kw)
+
 mcp = FastMCP("osint", instructions="Recolectores OSINT pasivos con saneado de contenido.")
 
 
@@ -80,7 +92,7 @@ def robots_txt(dominio: str) -> dict:
     _registro("robots_txt", {"dominio": dominio})
     for esquema in ("https", "http"):
         try:
-            with httpx.Client(timeout=10, verify=False, follow_redirects=True) as c:
+            with _cliente_recon(timeout=10, follow_redirects=True) as c:
                 r = c.get(f"{esquema}://{dominio}/robots.txt")
             if r.status_code == 200:
                 texto = _saneado(r.text, 20_000)

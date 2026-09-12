@@ -38,6 +38,17 @@ except ImportError:  # pragma: no cover
     raise SystemExit(
         "Falta el SDK de MCP. Instale requirements.txt: pip install mcp")
 
+# z3 (auditoría seguridad): política TLS centralizada del recon (igual que
+# en orchestrator/transportes.py). RECON_TLS_ESTRICTO=1 verifica certificados.
+import sys as _sys  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+try:
+    from orchestrator.transportes import _cliente_http as _cliente_recon  # noqa: E402
+except Exception:  # pragma: no cover - despliegue solo-MCP sin orchestrator
+    def _cliente_recon(**kw):
+        return httpx.Client(verify=False, **kw)
+
 mcp = FastMCP(
     "recon",
     instructions="Herramientas de reconocimiento del lab. Requiere que toda "
@@ -110,7 +121,7 @@ def http_probe(url: str) -> dict:
     if not _en_scope_local(host):
         return {"error": "fuera de alcance local del servidor", "host": host}
     try:
-        with httpx.Client(verify=False, timeout=8, follow_redirects=False) as c:
+        with _cliente_recon(timeout=8, follow_redirects=False) as c:
             r = c.get(url if url.startswith("http") else f"https://{url}")
         cabeceras = {k.lower(): v for k, v in r.headers.items()
                      if k.lower() in ("server", "x-powered-by", "content-type",
@@ -158,7 +169,7 @@ def tech_fingerprint(url: str) -> dict:
     if not _en_scope_local(host):
         return {"error": "fuera de alcance local del servidor"}
     try:
-        with httpx.Client(verify=False, timeout=8) as c:
+        with _cliente_recon(timeout=8) as c:
             r = c.get(url if url.startswith("http") else f"https://{url}")
     except Exception as exc:
         return {"error": str(exc)[:200]}
