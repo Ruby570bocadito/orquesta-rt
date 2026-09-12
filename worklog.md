@@ -857,3 +857,25 @@ Stage Summary:
 - 522 passed / 8 skipped (0 fallos). Sin cambios de TypeScript: tsc/eslint como en la base.
 - La búsqueda del caso muestra fragmentos que corresponden a la coincidencia real — la misma tolerancia a tildes del índice, ahora también en lo que ve el operador.
 - Siguiente ronda propuesta (sesion-06): reenvío manual de entregas webhook fallidas (esquema), export Prometheus (cuarta ronda deferido: decidir o retirar), salud derivada por receptor, realce del término en la vista Memoria (trivial sobre el fragmento corregido).
+
+---
+Task ID: 34 (Z-DIRECTOR-sesion-01)
+Agent: z-director (dirección y revisión del conjunto orquesta-rt)
+Task: Auditoría directiva independiente del proyecto (bitácoras de z1/z2/z3 + instalación limpia + estado remoto de GitHub), cierre del F32 (secreto JWT en el historial público) y de la CI roja, con bitácora propia en docs/agentes/z-director/.
+
+Work Log:
+- Verificación independiente: venv limpio + requirements → 11 failed / 511 passed (mcp 2.2.0: el SDK 2.x renombró FastMCP y los 4 servidores MCP no arrancan); con mcp<2 → 522 passed / 8 skipped; tsc 0, eslint 0. Badge de Actions: "CI - failing" — la CI corría y fallaba mientras los entornos de los agentes veían verde local.
+- Veredicto de dirección: correcta (trayectoria v22→v27 coherente, 33 hallazgos de z3 remediados con test, bitácoras excelentes). El fallo sistémico era de "verdad remota": nadie miraba lo que GitHub muestra a un tercero.
+- F32 (ALTO, abierto desde z3 sesión 5): verificado a mano — usuarios.db con secreto_jwt real (64 hex) y hash scrypt de admin accesible por git cat-file en commits pre-purga; ventana de exposición 9cdab8d→a79b2f3. Escaneo COMPLETO del historial: las 11 BDs (usuarios.db + 10 casos/*.db) son el único material sensible (sin .env reales, sin .pem/.key).
+- PURGA: git filter-repo --force --invert-paths --path usuarios.db --path casos/ sobre TODO el historial. Verificado: 0 BDs en commits y objetos, blob del secreto físicamente inexistente, árbol pre/post idéntico (1f10abf4…), 30 commits conservados, suite post-purga 522/8. Todos los hashes posteriores a v22 cambiaron (las bitácoras que citan hashes pre-purga quedan como historia, no como error).
+- CI: tope mcp>=1.1.2,<2 en requirements.txt con comentario de razón (commit 7a6d7ca pre-purga → 990832d post). El workflow ci.yml NO se tocó: mi primera lectura de "branches: ain]" era un artefacto de renderizado del terminal — od -c + yaml.safe_load confirman que siempre dijo [main] (falso positivo propio, declarado en la bitácora).
+- DOCS: docs/agentes/z-director/ (README + sesion-01-auditoria-directiva-y-cierre-incidentes.md) + z-director.md (punta de rastro) + badge de tests del README al día (290→522); este registro.
+- OPERADOR (bloqueante): force-push de main + borrar ramas remotas z3/auditoria-seguridad-sesion1 y z3/auditoria-seguridad-sesion3 (fusionadas en main; apuntan a historia con el secreto). TODOS los entornos de agentes deben re-clonar (o reset --hard origin/main) antes de su próximo push — un push desde un clon pre-purga devolvería el secreto a GitHub.
+- z3 (esta semana): rotar secreto JWT (UPDATE config + reinicio — HS256 invalida todos los tokens previos) y contraseña admin en todo despliegue derivado; cerrar el inventario de credenciales históricas de su sesión 1.
+
+Stage Summary:
+- Historial limpio (0 BDs, árbol intacto, 30 commits), suite 522/8, tsc/eslint 0, requirements resuelve con tope (mcp 1.30.0).
+- F32 purgado en local — pendiente el force-push del operador y la rotación de z3 para cierre formal.
+- CI quedará en verde tras el push (la causa era solo mcp 2.x); órdenes de dirección emitidas para z2 (checklist de instalación limpia + badge post-push en cada ronda) y z1 (mantener roadmap).
+- Siguiente sesión de dirección propuesta: verificación post-push (badge, ramas, clone-limpio) y cierre formal de F32.
+
