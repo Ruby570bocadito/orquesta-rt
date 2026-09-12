@@ -266,6 +266,26 @@ export interface DeltaCtem {
   hallazgos_nuevos: number;
   detecciones_nuevas: number;
   cobertura_ejercitados: { antes: number | null; despues: number };
+  /** v27 — bucle CTEM↔purple↔Sigma: transiciones de cobertura entre corridas. */
+  cobertura_sigma?: DeltaCoberturaSigma;
+}
+
+/** Cobertura Sigma del caso (v27): cruce purple × Sigma válido × VECTR.
+ *  Solo cuentan reglas VALIDADAS; las listas salen de hallazgos reales. */
+export interface CoberturaSigma {
+  reglas_total: number;
+  reglas_validas: number;
+  tecnicas_con_regla_valida: string[];
+  tecnicas_cubiertas: string[];
+  puntos_ciegos: string[];
+}
+
+/** Delta de cobertura Sigma (v27): la transición que el bucle registra. */
+export interface DeltaCoberturaSigma {
+  comparable: boolean;
+  transiciones: string[];
+  regresiones: string[];
+  nuevas_reglas: string[];
 }
 
 export interface CorridaCtem {
@@ -279,6 +299,7 @@ export interface CorridaCtem {
     instante?: string;
     cobertura?: { total: number; ejercitados: number; disponibles: number; manuales: number };
     detecciones_documentadas?: number;
+    cobertura_sigma?: CoberturaSigma;
     delta?: DeltaCtem;
     corrida_id?: string;
     evidencia_id?: string;

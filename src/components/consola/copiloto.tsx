@@ -266,6 +266,27 @@ export function VistaCopiloto() {
                           )}
                         </div>
                       )}
+                      {/* v27 — transparencia del escudo LLM01: si el escudo
+                          trabajó en esta respuesta (marcó la entrada o
+                          descartó ecos en la salida), el operador lo ve.
+                          El filtrado no puede ser un silencio. */}
+                      {m.rol === "copiloto" && !m.error && m.escudo &&
+                       (m.escudo.marcas_entrada > 0 || m.escudo.ecos_descartados > 0) && (
+                        <div className="flex items-start gap-1.5 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1.5 text-[11px] leading-relaxed text-amber-200/90">
+                          <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                          <span>
+                            Escudo LLM01 activo en esta respuesta:{" "}
+                            {m.escudo.marcas_entrada > 0 && (
+                              <>{" "}{m.escudo.marcas_entrada} patrón(es) marcado(s) como dato en la entrada</>
+                            )}
+                            {m.escudo.marcas_entrada > 0 && m.escudo.ecos_descartados > 0 && " ·"}
+                            {m.escudo.ecos_descartados > 0 && (
+                              <>{" "}{m.escudo.ecos_descartados} bloque(s) eco descartado(s) en la salida</>
+                            )}
+                            . Las sugerencias provienen solo del razonamiento del copiloto.
+                          </span>
+                        </div>
+                      )}
                       {m.fuentes && m.fuentes.length > 0 && (
                         <div className="space-y-1 border-t border-line/70 pt-2">
                           <span className="text-[11px] font-medium text-zinc-500">

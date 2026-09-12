@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, LogOut, ShieldCheck } from "lucide-react";
+import { Loader2, LogOut, ShieldCheck, TimerReset } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
   usarConsola, obtenerHigiene, cerrarSesionesPropias,
@@ -58,6 +58,19 @@ function minutosRestantes(segundos: number | null | undefined): string {
   if (segundos < 3600) return `${Math.max(1, Math.round(segundos / 60))} min`;
   if (segundos < 86400) return `${Math.round(segundos / 3600)} h`;
   return `${Math.round(segundos / 86400)} días`;
+}
+
+// v27 — aviso de caducidad próxima: por debajo de este umbral la sesión
+// sigue VÁLIDA (el middleware la acepta) pero puede morir a mitad de un
+// engagement si el operador no renueva. El panel avisa ANTES de que pase.
+const UMBRAL_AVISO_SEGUNDOS = 30 * 60;
+
+function caducaPronto(higiene: HigieneCuenta): boolean {
+  const s = higiene.token.segundos_restantes;
+  return Boolean(
+    higiene.token.sesion_valida &&
+    s != null && s > 0 && s <= UMBRAL_AVISO_SEGUNDOS,
+  );
 }
 
 function Fila({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
@@ -167,6 +180,9 @@ export function DialogoHigiene({ abierto, onCerrar }: { abierto: boolean; onCerr
                       (en {minutosRestantes(higiene.token.segundos_restantes)})
                     </span>
                   )}
+                  {caducaPronto(higiene) && (
+                    <Insignia tono="ambar">caduca pronto</Insignia>
+                  )}
                 </Fila>
                 <Fila etiqueta="Corte de revocación">
                   {higiene.invalidar_antes
@@ -174,6 +190,18 @@ export function DialogoHigiene({ abierto, onCerrar }: { abierto: boolean; onCerr
                     : "sin cortes"}
                 </Fila>
               </div>
+
+              {caducaPronto(higiene) && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+                  <TimerReset className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Tu sesión caduca en menos de 30 minutos. Renueva el acceso
+                    cuando termines el paso en curso: si caduca a mitad de un
+                    engagement perderás el hilo de la consola hasta volver a
+                    entrar (el caso no pierde nada; tú sí el contexto).
+                  </span>
+                </div>
+              )}
 
               <p className="text-[11px] leading-relaxed text-zinc-500">
                 «Cerrar en todos los dispositivos» revoca <span className="text-zinc-300">todos</span> los

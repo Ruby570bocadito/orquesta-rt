@@ -200,6 +200,9 @@ export interface MensajeCopiloto {
   fuentes?: FuenteCopiloto[];
   secciones?: { titulo: string; cuerpo: string }[];
   sugerencias?: SugerenciaCopiloto[];
+  /** v27 — transparencia del escudo LLM01: trabajo del escudo en ambos
+   *  canales de ESTA respuesta (entrada marcada, salida filtrada). */
+  escudo?: { marcas_entrada: number; ecos_descartados: number };
   error?: boolean;
   ts: string;
 }
@@ -1314,6 +1317,7 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
         fuentes: FuenteCopiloto[];
         secciones?: Record<string, string>;
         sugerencias?: SugerenciaCopiloto[];
+        escudo?: { marcas_entrada: number; ecos_descartados: number };
       }>(`/engagements/${id}/copiloto`, {
         method: "POST",
         body: JSON.stringify({ pregunta: texto, historial }),
@@ -1330,6 +1334,7 @@ export const usarConsola = create<EstadoConsola>((set, get) => ({
         fuentes: r.fuentes,
         secciones,
         sugerencias: r.sugerencias || [],
+        escudo: r.escudo,
         ts: new Date().toISOString(),
       };
       set({ copilotoConversacion: [...get().copilotoConversacion, respuesta] });

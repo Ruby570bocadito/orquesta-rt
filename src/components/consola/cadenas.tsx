@@ -377,6 +377,28 @@ export function VistaCadenas() {
                     )}
                   </>
                 )}
+                {/* v27 — bucle CTEM↔purple↔Sigma: transiciones de cobertura
+                    entre corridas. Solo cuando hay base comparable: sin base
+                    no se fabrican transiciones (honestidad del delta). */}
+                {ctem.ultimo_delta.cobertura_sigma?.comparable && (
+                  <>
+                    {ctem.ultimo_delta.cobertura_sigma.transiciones.length ? (
+                      <Insignia tono="esmeralda">
+                        bucle Sigma: {ctem.ultimo_delta.cobertura_sigma.transiciones.join(", ")} detectada(s) con regla válida
+                      </Insignia>
+                    ) : null}
+                    {ctem.ultimo_delta.cobertura_sigma.regresiones.length ? (
+                      <Insignia tono="rojo">
+                        puntos ciegos nuevos: {ctem.ultimo_delta.cobertura_sigma.regresiones.join(", ")}
+                      </Insignia>
+                    ) : null}
+                    {ctem.ultimo_delta.cobertura_sigma.nuevas_reglas.length ? (
+                      <Insignia tono="teal">
+                        +{ctem.ultimo_delta.cobertura_sigma.nuevas_reglas.length} regla(s) Sigma validada(s)
+                      </Insignia>
+                    ) : null}
+                  </>
+                )}
               </div>
             ) : null}
 
@@ -396,6 +418,13 @@ export function VistaCadenas() {
                         ? `${c.resumen.cobertura.ejercitados}/${c.resumen.cobertura.total} ejercitados · `
                         : ""}
                       {c.resumen?.detecciones_documentadas ?? 0} detecciones
+                      {/* v27: cruce Sigma del caso en cada corrida */}
+                      {c.resumen?.cobertura_sigma &&
+                       c.resumen.cobertura_sigma.reglas_total > 0 &&
+                       ` · Sigma ${c.resumen.cobertura_sigma.reglas_validas}/${c.resumen.cobertura_sigma.reglas_total} válidas`}
+                      {c.resumen?.cobertura_sigma?.tecnicas_cubiertas?.length
+                        ? ` · ${c.resumen.cobertura_sigma.tecnicas_cubiertas.length} cubierta(s)`
+                        : ""}
                     </span>
                     <span>
                       {new Date(c.creado_en).toLocaleString("es-ES", {
