@@ -30,12 +30,24 @@ operador, nunca un tercero. En Docker se publica en la red del lab.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+# z3 (auditoría): techo duro del cuerpo de petición. Sin él, un cliente con
+# una Content-Length gigante (o mentirosa) agotaba la memoria del host antes
+# de tocar la lógica: el lab es inseguro por diseño, no por descuido.
+MAX_CUERPO_BYTES = 5 * 1024 * 1024  # 5 MB sobra para lotes MISP reales
+
+# Techo del parámetro `limit` de restSearch (la API real usa conceptos
+# similares): evita bucles absurdos con limit=10**12 aunque la colección
+# crezca.
+MAX_LIMITE = 10_000
 
 # ---------------------------------------------------------------------------
 # Estado del intel (atributos y eventos) — en memoria + persistencia opcional
@@ -105,10 +117,19 @@ def _cargar_estado(ruta: Path | None) -> dict:
 def _guardar_estado() -> None:
     if _RUTA_ESTADO is None:
         return
+    # z3 (auditoría): escritura ATÓMICA (temp + os.replace). La escritura
+    # directa dejaba un JSON truncado/sucio si el proceso moría a mitad,
+    # y el arranque siguiente lo descartaba entero ("estado corrupto").
     try:
         _RUTA_ESTADO.parent.mkdir(parents=True, exist_ok=True)
-        _RUTA_ESTADO.write_text(
-            json.dumps(_INTEL, ensure_ascii=False, indent=1), encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=_RUTA_ESTADO.parent,
+                prefix=".misp_lab_", suffix=".tmp", delete=False) as tmp:
+            json.dump(_INTEL, tmp, ensure_ascii=False, indent=1)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            ruta_tmp = Path(tmp.name)
+        os.replace(ruta_tmp, _RUTA_ESTADO)  # atómico en POSIX
     except Exception as exc:  # persistencia best-effort, nunca tumba el lab
         print(f"[misp-lab] aviso: no se pudo guardar el estado: {exc}",
               flush=True)
@@ -132,13 +153,25 @@ def _filtrar_dias(filtro: str | None) -> int | None:
     return None
 
 
+def _entero_seguro(valor: object, defecto: int, minimo: int,
+                   maximo: int) -> int:
+    """z3 (auditoría): parsing entero acotado. Antes, un `limit`,
+    `threat_level_id` o `analysis` no numérico lanzaba ValueError SIN
+    capturar dentro del manejador HTTP: la hebra moría sin respuesta
+    (DoS barato y sin diagnóstico). Ahora nunca lanza."""
+    try:
+        return max(minimo, min(maximo, int(valor)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return defecto
+
+
 def _attrs_rest(cuerpo: dict) -> dict:
     valores = cuerpo.get("value") or []
     if isinstance(valores, str):
         valores = [valores]
     buscados = {str(v).strip().lower() for v in valores if str(v).strip()}
     cutoff = _filtrar_dias(cuerpo.get("timestamp"))
-    limite = int(cuerpo.get("limit") or 500)
+    limite = _entero_seguro(cuerpo.get("limit") or 500, 500, 1, MAX_LIMITE)
     with _bloqueo:
         encontrados = []
         for a in _INTEL["atributos"]:
@@ -157,7 +190,7 @@ def _events_rest(cuerpo: dict) -> dict:
     if isinstance(tags, str):
         tags = [tags]
     cutoff = _filtrar_dias(cuerpo.get("timestamp"))
-    limite = int(cuerpo.get("limit") or 20)
+    limite = _entero_seguro(cuerpo.get("limit") or 20, 20, 1, MAX_LIMITE)
     solo_publicados = bool(cuerpo.get("published"))
     with _bloqueo:
         salida = []
@@ -182,14 +215,18 @@ def _events_add(cuerpo: dict) -> dict:
     if not info:
         return {"name": "El evento necesita info", "message": "info vacía",
                 "url": "/events/add"}
+    # z3 (auditoría): rangos válidos de la especificación MISP
+    # (threat_level 1-4, analysis 0-2) — se acotan, nunca se rechaza a ciegas.
+    nivel = _entero_seguro(evento.get("threat_level_id") or 4, 4, 1, 4)
+    analisis = _entero_seguro(evento.get("analysis") or 0, 0, 0, 2)
     with _bloqueo:
         eid = str(_INTEL["siguiente_id"])
         _INTEL["siguiente_id"] += 1
         t = _ahora()
         _INTEL["eventos"].append({
             "id": eid, "info": info,
-            "threat_level_id": int(evento.get("threat_level_id") or 4),
-            "analysis": int(evento.get("analysis") or 0),
+            "threat_level_id": nivel,
+            "analysis": analisis,
             "date": time.strftime("%Y-%m-%d", time.gmtime(t)),
             "published": False, "timestamp": t, "Tag": [],
         })
@@ -205,8 +242,8 @@ def _events_add(cuerpo: dict) -> dict:
             })
         _guardar_estado()
     return {"Event": {"id": eid, "info": info, "distribution": 0,
-                      "threat_level_id": int(evento.get("threat_level_id") or 4),
-                      "analysis": int(evento.get("analysis") or 0),
+                      "threat_level_id": nivel,
+                      "analysis": analisis,
                       "attribute_count": len(attrs)}}
 
 
@@ -226,18 +263,27 @@ class ManejadorMispLab(BaseHTTPRequestHandler):
         self.wfile.write(cuerpo)
 
     def _autorizado(self) -> bool:
-        return self.headers.get("Authorization", "") == _CLAVE
+        # z3 (auditoría): comparación en tiempo constante (hmac.compare_digest).
+        # El == nativo filtraba el prefijo correcto de la clave por tiempo;
+        # en un servicio de lab el riesgo es menor, pero la corrección es
+        # gratuita y evita que un mal hábito migre a producción.
+        enviada = self.headers.get("Authorization", "")
+        return hmac.compare_digest(enviada.encode("utf-8"),
+                                   _CLAVE.encode("utf-8"))
 
     def do_GET(self) -> None:  # noqa: N802 (API stdlib)
         if not self._autorizado():
             self._json(403, {"name": "Clave API inválida",
                              "message": "Authorization requerida"})
             return
-        ruta = self.path.split("?")[0]
-        if ruta == "/servers/getVersion":
-            self._json(200, {"version": _VERSION})
-        else:
-            self._json(404, {"name": "No encontrado", "message": ruta})
+        try:
+            ruta = self.path.split("?")[0]
+            if ruta == "/servers/getVersion":
+                self._json(200, {"version": _VERSION})
+            else:
+                self._json(404, {"name": "No encontrado", "message": ruta})
+        except Exception as exc:  # z3: nunca morir sin respuesta
+            self._json(500, {"name": "Error interno", "message": str(exc)[:200]})
 
     def do_POST(self) -> None:  # noqa: N802 (API stdlib)
         if not self._autorizado():
@@ -246,20 +292,34 @@ class ManejadorMispLab(BaseHTTPRequestHandler):
             return
         try:
             longitud = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json(400, {"name": "Cabecera inválida",
+                             "message": "Content-Length numérica esperada"})
+            return
+        # z3 (auditoría F18): sin techo, una Content-Length de gigas
+        # monolitizaba memoria antes de devolver 413. Techo + 413 explícito.
+        if longitud > MAX_CUERPO_BYTES:
+            self._json(413, {"name": "Cuerpo demasiado grande",
+                             "message": f"máximo {MAX_CUERPO_BYTES} bytes"})
+            return
+        try:
             cuerpo = json.loads(self.rfile.read(longitud) or b"{}")
         except Exception:
             self._json(400, {"name": "Cuerpo inválido",
                              "message": "JSON esperado"})
             return
-        ruta = self.path.split("?")[0]
-        if ruta == "/attributes/restSearch":
-            self._json(200, _attrs_rest(cuerpo))
-        elif ruta == "/events/restSearch":
-            self._json(200, _events_rest(cuerpo))
-        elif ruta == "/events/add":
-            self._json(200, _events_add(cuerpo))
-        else:
-            self._json(404, {"name": "No encontrado", "message": ruta})
+        try:
+            ruta = self.path.split("?")[0]
+            if ruta == "/attributes/restSearch":
+                self._json(200, _attrs_rest(cuerpo))
+            elif ruta == "/events/restSearch":
+                self._json(200, _events_rest(cuerpo))
+            elif ruta == "/events/add":
+                self._json(200, _events_add(cuerpo))
+            else:
+                self._json(404, {"name": "No encontrado", "message": ruta})
+        except Exception as exc:  # z3 (F19): 500 limpio, hebra siempre viva
+            self._json(500, {"name": "Error interno", "message": str(exc)[:200]})
 
     def log_message(self, formato: str, *args) -> None:
         print(f"[misp-lab] {self.address_string()} {formato % args}", flush=True)

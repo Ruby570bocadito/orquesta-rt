@@ -641,3 +641,31 @@ Stage Summary:
 - El operador valida las reglas Sigma desde la consola con veredicto por regla, cerrando la propuesta nº 1 de v24; el lab MISP queda documentado en la puerta de entrada del despliegue.
 - Bitácora del agente reorganizada según instrucción del operador: docs/agentes/z1/ contiene TODAS las sesiones (una por fichero).
 - Siguiente (propuestas en docs/agentes/z1/sesion-02): endurecer _partir_estructura frente a eco de JSON, ingestión Neo4j del dominio real, bucle CTEM↔purple↔Sigma y panel de sesiones de usuario en la consola.
+
+---
+Task ID: 26
+Agent: z3 (agente de auditoría de seguridad, bitácora en docs/agentes/agente-z3/)
+Task: Sesión 3 — tercera ronda de auditoría sobre main v24 (MISP lab + Sigma), remediación F17-F24, tests de regresión y reorganización documental (carpeta docs/agentes/agente-z3/).
+
+Work Log:
+- SINCRONIZACIÓN: main actualizado a 11be212 (v24) y rama z3/auditoria-seguridad-sesion3 creada desde ahí. Leído el worklog completo y docs/agentes/ (z1.md de otro agente NO tocado).
+- RONDA 1 (código v24): servidor_misp_lab.py y sigma_valid.py completos, endpoint /sigma/validar (verificado: middleware RBAC nivel 2 + aislamiento tenant via _RE_ENGAGEMENT + auditoría), cambios purpleteam.py y docker-compose.lab.yml.
+- RONDA 2 (módulos nunca auditados): copiloto, razonador, ctem, threatled, navigator, busqueda, state, reporting completos + misp.py real. Constancia de lo revisado y OK (SQL parametrizado, catálogo real anti-invención, safe_load, etc.).
+- RONDA 3 (transversal): inventario completo de rutas API fuera de /api/engagements (no hay más BOLA), skills.ver_skill sin path traversal (índice en memoria), puertos publicados de ambos compose.
+- F17 (MEDIO, bug): reporting.construir_informe usaba h.get("tecnica") en vez de "tecnica_mitre" → el informe markdown perdía SIEMPRE el mapeo MITRE ATT&CK (el HTML sí lo tenía). Corregido + test.
+- F18 (MEDIO): servidor_misp_lab leía el cuerpo sin techo → OOM con Content-Length gigante. Techo 5 MB verificado antes de leer + 413; Content-Length no numérica → 400. Test con socket crudo (cabecera sin cuerpo).
+- F19 (MEDIO): int() sin capturar (limit/threat_level_id/analysis) mataban la hebra del manejador sin respuesta. _entero_seguro() con rangos oficiales MISP (limit 1-10000, threat 1-4, analysis 0-2) + guardia global 500 JSON. Test: basura → 200 acotado y servidor vivo.
+- F20 (BAJO): comparación de clave API en tiempo no constante → hmac.compare_digest. Test 403/200.
+- F21 (BAJO): persistencia de estado no atómica → temp + fsync + os.replace. Test: JSON válido y sin .tmp residuales.
+- F22 (BAJO, endurecimiento): binds 0.0.0.0 en lab-misp (clave débil por defecto), lab-objetivo y vLLM (SIN auth) → todos a 127.0.0.1 con comentarios de cómo exponer legítimamente. Conectividad backend↔lab/vLLM intacta (red docker o loopback).
+- F23 (BAJO, bug): colisión {tecnica}-{slug}.yml en el paquete purple → entradas duplicadas en el ZIP y regla perdida en la validación ("1 de 1" con 2 ficheros). _nombres_sigma_unicos() con sufijo -2/-3 compartido por validación y ZIP. Tests: helper + ZIP E2E con dos hallazgos colisionados.
+- F24 (BAJO): _extraer_identificadores devolvía duplicados → errores repetidos en el veredicto Sigma. Dedup con orden. Test.
+- TESTS: nuevo test_z3_sesion3.py (8 casos, 8/8 verde). Suite completa: 329 passed, 8 skipped, 10 failed — los 10 fallos son los preexistentes del entorno de auditoría (yara/ldap3 no instalados; mismos nombres confirmados sobre commit base en sesiones 1-2). Cero regresiones. py_compile de los 4 ficheros + yaml.safe_load de ambos compose OK.
+- DOCUMENTACIÓN (petición del operador): creada docs/agentes/agente-z3/ con README (índice + metodología + tabla F1-F24), sesion-1, sesion-2 y sesion-3. docs/agentes/z3.md convertido en puntero (sin perder historial, sin tocar z1.md).
+
+Stage Summary:
+- 8 hallazgos nuevos remediados con tests (F17-F24); total acumulado z3: 24 fixes de seguridad/robustez en 3 sesiones.
+- El servidor MISP de lab ya no puede ser tumbado por volumen (413), basura en parámetros (400/200 acotado) ni muertes silenciosas de hebra; su estado sobrevive a cortes atómicamente.
+- vLLM sin auth y el intel del lab ya no quedan a la escucha en todas las interfaces.
+- El paquete purple es determinista ante hallazgos homónimos y el informe markdown vuelve a citar ATT&CK como el HTML.
+- Documentación del agente reorganizada en docs/agentes/agente-z3/ (todas las auditorías juntas, una por sesión).

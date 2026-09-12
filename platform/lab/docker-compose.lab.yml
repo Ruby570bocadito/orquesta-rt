@@ -16,9 +16,12 @@ services:
   lab-objetivo:
     image: nginx:1.24-alpine
     container_name: lab-acme-objetivo
+    # z3 (auditoría): loopback — el objetivo del lab es un ejercicio interno;
+    # publicarlo en todas las interfaces invita a terceros de la red al ruido
+    # del ejercicio. Si compartes el lab, usa un túnel SSH o una ACL.
     ports:
-      - "8443:443"
-      - "8080:80"
+      - "127.0.0.1:8443:443"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./objetivo/index.html:/usr/share/nginx/html/index.html:ro
       - ./objetivo/robots.txt:/usr/share/nginx/html/robots.txt:ro
@@ -32,6 +35,11 @@ services:
   # para ejercitar el enriquecimiento threat-intel de extremo a extremo.
   # Clave del lab: clave-lab-misp (SOLO laboratorio; cámbiala con LAB_MISP_KEY).
   # En el backend: MISP_URL=http://lab-misp:9000  MISP_KEY=clave-lab-misp
+  # z3 (auditoría): el puerto se publica SOLO en loopback — con la clave
+  # por defecto débil, publicarlo en 0.0.0.0 exponía escritura del intel a
+  # toda la red local. El backend lo alcanza por la red docker compartida
+  # (lab-misp:9000) o por 127.0.0.1:8444 desde el propio host; si algún día
+  # necesitas exponerlo, cambia la clave ANTES de abrir el bind.
   lab-misp:
     image: python:3.12-alpine
     container_name: lab-acme-misp
@@ -42,7 +50,7 @@ services:
       - ./servidor_misp_lab.py:/servidor_misp_lab.py:ro
       - lab_misp_estado:/estado
     ports:
-      - "8444:9000"
+      - "127.0.0.1:8444:9000"
     restart: unless-stopped
 
   # Genera el certificado autofirmado del lab antes de arrancar nginx

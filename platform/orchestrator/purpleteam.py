@@ -93,6 +93,29 @@ def _slug(texto: str, maximo: int = 42) -> str:
     return (slug[:maximo].rstrip("-")) or "hallazgo"
 
 
+def _nombres_sigma_unicos(generadas: list[dict]) -> dict[str, dict]:
+    """Nombres de fichero Sigma ÚNICOS para el lote.
+
+    z3 (auditoría F23): dos hallazgos distintos pueden compartir técnica y
+    slug de título (p. ej. dos 'Acceso inicial' de T1190). Con el nombre
+    plano, el ZIP contenía entradas duplicadas ambiguas y el diccionario de
+    validación perdía una de las reglas (el informe decía '1 de 1' con 2
+    ficheros). Ahora se desambigua con sufijo -2, -3… de forma estable.
+    """
+    usados: set[str] = set()
+    salida: dict[str, dict] = {}
+    for r in generadas:
+        base = f"{r['tecnica'] or 'tecnica'}-{_slug(r['titulo'])}.yml"
+        nombre = base
+        n = 2
+        while nombre in usados:
+            nombre = base[:-4] + f"-{n}.yml"
+            n += 1
+        usados.add(nombre)
+        salida[nombre] = r
+    return salida
+
+
 def reglas_sigma_caso(engagement_id: str,
                       memoria: MemoriaCaso) -> tuple[list[dict], list[str]]:
     """Reglas Sigma del caso + técnicas sin fuente de logs conocida.
@@ -205,8 +228,7 @@ def construir_paquete_purple(engagement_id: str,
     # Validación estructural de las reglas ANTES de entregarlas (v24):
     # el informe declara el veredicto real por regla, no "esperamos que".
     from .sigma_valid import validar_lote
-    nombres = {f"{r['tecnica']}-{_slug(r['titulo'])}.yml": r
-               for r in generadas}
+    nombres = _nombres_sigma_unicos(generadas)
     validacion = validar_lote({n: r["yml"] for n, r in nombres.items()})
     generados = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lineas = [
@@ -275,7 +297,13 @@ def construir_paquete_purple(engagement_id: str,
                     "para tu entorno antes de desplegar.\n")
         for h_id, yml in reglas.items():
             h = next(x for x in hallazgos if x["id"] == h_id)
-            nombre = f"{(h.get('tecnica_mitre') or 'tecnica').upper()}-{_slug(h['titulo'])}.yml"
+            # z3 (F23): nombre ÚNICO compartido con la validación — el
+            # fichero del ZIP y la fila del veredicto hablan siempre del
+            # mismo hallazgo, sin colisiones.
+            nombre = next((n for n, r in nombres.items()
+                           if r["id"] == h_id),
+                          f"{(h.get('tecnica_mitre') or 'tecnica').upper()}-"
+                          f"{_slug(h['titulo'])}.yml")
             zf.writestr(f"sigma/{nombre}", yml)
         # Veredicto de validación Sigma (v24): evidencia auditable de que
         # las reglas entregadas pasan la comprobación estructural.

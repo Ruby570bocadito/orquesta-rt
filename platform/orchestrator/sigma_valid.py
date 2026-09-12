@@ -56,6 +56,14 @@ def _extraer_identificadores(condicion: str) -> list[str]:
     """
     tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_\*\[\]]*", condicion or "")
     nombres: list[str] = []
+    vistos: set[str] = set()  # z3 (F24): sin duplicados — "sel and sel"
+    # no debe producir dos errores idénticos en el veredicto.
+
+    def _apuntar(nombre: str) -> None:
+        if nombre not in vistos:
+            vistos.add(nombre)
+            nombres.append(nombre)
+
     # "N of patron*" / "1 of them" / "all of sel"
     patron_of = re.findall(
         r"(?:\b\d+|\ball\b|\bany\b|\bone\b)\s+of\s+([A-Za-z_][A-Za-z0-9_\*]*)",
@@ -64,7 +72,7 @@ def _extraer_identificadores(condicion: str) -> list[str]:
         bajo = patron.lower()
         if bajo in _PALABRAS_CONDICION:
             continue  # "them"/"all"/"any": cuantificador, no una selección
-        nombres.append(bajo)
+        _apuntar(bajo)
     for t in tokens:
         bajo = t.lower()
         if bajo in _PALABRAS_CONDICION:
@@ -74,7 +82,7 @@ def _extraer_identificadores(condicion: str) -> list[str]:
             continue
         if re.fullmatch(r"\d+", bajo):
             continue
-        nombres.append(bajo)
+        _apuntar(bajo)
     return nombres
 
 
