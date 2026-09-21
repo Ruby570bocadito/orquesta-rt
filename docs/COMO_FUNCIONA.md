@@ -61,7 +61,7 @@ conectan vía skills, y nada se ejecuta sin tu firma.
    y el ciclo se detiene hasta que un operador la firma. Hay kill switch
    (parada de emergencia) que deniega todo al instante. Nada avanza solo.
 
-El modelo de IA (GLM) llega por un puente local con su propio token; los
+El modelo de IA llega por un puente local con su propio token; los
 resultados de cada acción quedan como **evidencias con cadena de custodia
 firmada (SHA-256 + HMAC)**, verificables después.
 
