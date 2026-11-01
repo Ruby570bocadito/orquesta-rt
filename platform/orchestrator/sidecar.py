@@ -13,8 +13,12 @@ import subprocess
 import urllib.request
 
 import os
+import shutil
+import tempfile
 
-LOCK = "/tmp/orquestart-consola.lock"
+# Lockfile en el temporal del sistema (antes era /tmp, que no existe en
+# Windows → el guardián reventaba con FileNotFoundError en bucle).
+LOCK = os.path.join(tempfile.gettempdir(), "orquestart-consola.lock")
 # Raíz PORTABLE: directorio padre de platform/ (donde vive este paquete).
 RAIZ = os.environ.get("ORQUESTA_RAIZ") or str(
     __import__("pathlib").Path(__file__).resolve().parents[2])
@@ -38,6 +42,11 @@ def asegurar_consola() -> bool:
     """
     if _puerto_vivo(3000):
         return True
+    # El supervisor es un script bash (.sh). Sin bash (Windows nativo) no se
+    # puede relanzar la consola por esta vía; ahí el arranque lo gestiona
+    # start.ps1 o `bun run dev`. No es un error: se omite en silencio.
+    if shutil.which("bash") is None:
+        return False
     try:
         import os
         # ¿Hay ya un supervisor anotado y vivo?
