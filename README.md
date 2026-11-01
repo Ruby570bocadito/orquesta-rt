@@ -92,7 +92,7 @@ común, y la detección del defensor es un resultado de primera clase
 | SSO federado | ✅ Real | OIDC authorization-code + PKCE S256, verificación RS256 del id_token vía JWKS, alta JIT |
 | Multi-tenant RBAC | ✅ Real | Roles admin/gestor/operador/lector firmados en el JWT; aislamiento de casos por organización en la API |
 | Webhooks | ✅ Real | Entrega firmada HMAC-SHA256, reintentos acotados, anti-SSRF, historial de entregas |
-| Purple teaming | ✅ Real | Registro de detección/preención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida y VALIDADOS antes de la entrega |
+| Purple teaming | ✅ Real | Registro de detección/prevención por técnica (VECTR), esqueletos Sigma solo con fuente de logs conocida y VALIDADOS antes de la entrega |
 | CTEM continuo | ✅ Real | Corridas continuas por cadena (programables), bucle CTEM↔purple↔Sigma: solo cuenta cobertura la regla válida que el azul verificó; anota gains y regresiones entre corridas |
 | Higiene de sesión | ✅ Real | Sesiones revocables, estado vivo de la cuenta, sign-out-everywhere, aviso de caducidad próxima del JWT, **sesiones activas visibles con dispositivo e IP (v34)** |
 | Cobertura ATT&CK | ✅ Real | Matriz técnica × campaña entre casos, CSV exportable, capa Navigator |
@@ -225,7 +225,7 @@ Para operar contra el lab local, crea el caso con dominio `localhost` y CIDR
 │   ├── servidores_mcp/           Servidores MCP: recon, evidencias, OSINT, adaptador C2
 │   ├── skills/                   asrep_roasting_lab · kerberoasting_lab · llmnr_poisoning_lab
 │   ├── roe/                      Plantilla de ROE máquina-legible
-│   └── tests/                    Suite pytest (509 tests)
+│   └── tests/                    Suite pytest completa (ver badge de CI)
 ├── lab/                          Laboratorio: objetivo HTTP+AD, Keycloak, Neo4j,
 │                                 colector de dominio, docker-compose.lab.yml
 ├── deploy/                       Kubernetes (manifiestos + guía de despliegue)
