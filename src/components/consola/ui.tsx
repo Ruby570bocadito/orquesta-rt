@@ -28,7 +28,7 @@ export function FiltroSegmentado({
             onClick={() => onChange(o.valor)}
             aria-pressed={activo}
             className={cn(
-              "relative rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors",
+              "relative rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
               activo ? "text-zinc-100" : "text-zinc-500 hover:text-zinc-300",
             )}
           >
@@ -89,7 +89,7 @@ export function Tarjeta({
   return (
     <div
       className={cn(
-        "surface rounded-xl border border-line p-5 shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset]",
+        "surface rounded-xl border border-line p-5",
         className,
       )}
     >

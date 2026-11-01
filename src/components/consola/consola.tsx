@@ -389,7 +389,7 @@ export function Consola() {
         <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Secciones de la consola">
           {GRUPOS_NAVEGACION.map((grupo, gi) => (
             <div key={grupo.titulo} className={gi > 0 ? "mt-5" : undefined}>
-              <p className="mb-1 px-3 font-mono text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+              <p className="mb-1.5 px-3 text-[11px] font-medium text-zinc-500">
                 {grupo.titulo}
               </p>
               <div className="space-y-0.5">
@@ -452,7 +452,7 @@ export function Consola() {
               <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 p-3">
                 {GRUPOS_NAVEGACION.map((grupo) => (
                   <div key={grupo.titulo} className="col-span-2">
-                    <p className="mb-1 mt-2 px-1 font-mono text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-600 first:mt-0">
+                    <p className="mb-1.5 mt-3 px-1 text-[11px] font-medium text-zinc-500 first:mt-0">
                       {grupo.titulo}
                     </p>
                     <div className="grid grid-cols-2 gap-1">
@@ -718,7 +718,7 @@ function MenuExportar({
           aria-label="Entregables exportables"
           className="absolute right-0 top-9 z-50 w-72 overflow-hidden rounded-xl border border-line bg-panel shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
         >
-          <p className="border-b border-line px-3 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+          <p className="border-b border-line px-3 py-2 text-[11px] font-medium text-zinc-500">
             Entregables del caso
           </p>
           {items.map((item) => (
@@ -915,7 +915,7 @@ function BarraSuperior({
             <button
               onClick={onAvanzar}
               disabled={!faseEjecutable}
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-crimson px-2.5 text-xs font-semibold text-white transition-colors hover:bg-crimson-bright disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-go px-2.5 text-xs font-semibold text-white transition-colors hover:bg-go-bright disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Ejecutar fase actual"
               title={pendientes > 0 ? "Resuelve las aprobaciones pendientes primero" : "Ejecutar la fase actual del orquestador"}
             >

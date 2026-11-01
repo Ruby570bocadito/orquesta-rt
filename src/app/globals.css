@@ -52,6 +52,10 @@
   --color-crimson: #e5484d;
   --color-crimson-bright: #f2555a;
   --color-crimson-deep: #b52e33;
+  /* "Ir/ejecutar" — acción primaria segura, distinta del crimson destructivo
+     (Parada/crítico). El rojo-sobre-rojo confundía ejecutar con parar. */
+  --color-go: #047857;
+  --color-go-bright: #059669;
 }
 
 :root {
@@ -144,13 +148,13 @@
     background-clip: text;
     color: transparent;
   }
-  /* Resplandor crimson */
+  /* Realce crimson (plano, sin resplandor: superficies en reposo sin sombra) */
   .glow-crimson {
-    box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.25), 0 8px 40px -8px rgba(229, 72, 77, 0.35);
+    box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.22);
   }
-  /* Superficies */
+  /* Superficies planas: separación por tono, no por gradiente */
   .surface {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)) #101014;
+    background: #101014;
   }
   /* Animación de "escaneo" para líneas decorativas */
   .animate-scanline {
