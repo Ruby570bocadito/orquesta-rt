@@ -107,6 +107,11 @@ let _pythonResuelto: string | null = null;
 // abortando `next build` ("points out of the filesystem root").
 const _REL_VENV = [".venv", "bin", "python3"].join("/");
 const _REL_VENV_PLATAFORMA = ["platform", ".venv", "bin", "python3"].join("/");
+// Windows: el venv pone el intérprete en .venv/Scripts/python.exe (no en
+// bin/python3), y "python3" no existe en el PATH (es "python" o "py"). Sin
+// estos candidatos, en Windows el backend NO arrancaba con `next dev`.
+const _REL_VENV_WIN = [".venv", "Scripts", "python.exe"].join("/");
+const _REL_VENV_PLATAFORMA_WIN = ["platform", ".venv", "Scripts", "python.exe"].join("/");
 
 async function importable(py: string): Promise<boolean> {
   const { execFile } = await import(/* turbopackIgnore: true */ "node:child_process");
@@ -122,8 +127,11 @@ export async function resolverPython(): Promise<string> {
   const candidatos = [
     process.env.ORQUESTA_PYTHON,
     path.join(RAIZ, _REL_VENV),
+    path.join(RAIZ, _REL_VENV_WIN),
     path.join(RAIZ, _REL_VENV_PLATAFORMA),
+    path.join(RAIZ, _REL_VENV_PLATAFORMA_WIN),
     "python3",
+    "python",
   ].filter((c): c is string => !!c);
   for (const candidato of candidatos) {
     if (await importable(candidato)) {
@@ -219,7 +227,7 @@ async function _arrancarBackendInterno(): Promise<{ orquestador: boolean; lab: b
   let lab = await labVivo().catch(() => false);
   if (!lab) {
     const out = fs.openSync(LOG_LAB, "a");
-    spawn("python3", ["lab/servidor_lab.py", "--puerto", "8080"], {
+    spawn(await resolverPython(), ["lab/servidor_lab.py", "--puerto", "8080"], {
       cwd: RAIZ_PLATAFORMA,
       detached: true,
       stdio: ["ignore", out, out],
