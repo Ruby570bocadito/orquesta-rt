@@ -99,3 +99,4 @@ usuarios.db
 /db/
 *.db
 download/
+.agent-tmp/
